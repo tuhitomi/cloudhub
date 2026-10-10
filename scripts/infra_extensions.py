@@ -22,7 +22,7 @@ def extend(params,r,settings,cf,worker):
     boundary=[policy(['ssm:UpdateInstanceInformation','ssmmessages:CreateControlChannel','ssmmessages:CreateDataChannel','ssmmessages:OpenControlChannel','ssmmessages:OpenDataChannel','ecr:GetAuthorizationToken']),
         policy(['ecr:BatchCheckLayerAvailability','ecr:GetDownloadUrlForLayer','ecr:BatchGetImage'],arn('ecr','repository/*')),
         policy(['logs:CreateLogStream','logs:PutLogEvents'],log_groups),policy('dynamodb:Scan',data_table),
-        policy('dynamodb:GetItem',att('Table'),{'ForAllValues:StringLike':{'dynamodb:LeadingKeys':[sub('E#${!aws:PrincipalTag/cloudhub:environment}')]}}),
+        policy('dynamodb:GetItem',att('Table'),{'ForAllValues:StringLike':{'dynamodb:LeadingKeys':[sub('E#${!aws:PrincipalTag/cloudhub:environment}'),sub('U#${!aws:PrincipalTag/cloudhub:owner}')]}}),
         policy('secretsmanager:GetSecretValue',arn('secretsmanager','secret:*'),{'StringEquals':{'secretsmanager:ResourceTag/cloudhub:environment':sub('${!aws:PrincipalTag/cloudhub:environment}')}}),
         policy('s3:ListBucket',sub('arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*')),
         policy('s3:GetObject',sub('arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*'))]

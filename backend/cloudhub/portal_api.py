@@ -6,7 +6,7 @@ UNHANDLED=object()
 
 def route(service, method, path, body, key, owner, admin, claims, query, public):
     accounts=None
-    if path.startswith('/admin/'):
+    if path.startswith('/admin/') or method=='POST' and path=='/environments' and body.get('validation_run') is True:
         if not admin:raise HubError('FORBIDDEN','Cần quyền quản trị.',403)
         from .accounts import Accounts
         accounts=Accounts(os.environ['USER_POOL_ID'])

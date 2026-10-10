@@ -54,9 +54,11 @@ def main():
     r["HttpApi"] = {"Type": "AWS::Serverless::HttpApi", "Properties": {"StageName": "$default",
         "CorsConfiguration": {"AllowOrigins": [sub("https://${FrontendDistribution.DomainName}")], "AllowHeaders": ["Authorization", "Content-Type", "Idempotency-Key"], "AllowMethods": ["GET", "POST", "OPTIONS"], "MaxAge": 300},
         "Auth": {"DefaultAuthorizer": "CognitoJwt", "Authorizers": {"CognitoJwt": {"IdentitySource": "$request.header.Authorization", "JwtConfiguration": {"issuer": sub("https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"), "audience": [ref("UserClient")]}, "AuthorizationScopes": ["cloudhub/use"]}}}}}
-    r["SessionRole"] = role("ec2.amazonaws.com", [], [sub("arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore")])
-    # Empty inline statements are not valid: SSM managed policy is sufficient.
-    r["SessionRole"]["Properties"].pop("Policies")
+    r['SessionRole'] = role('ec2.amazonaws.com', [
+        policy(['ssm:UpdateInstanceInformation', 'ssmmessages:CreateControlChannel',
+                'ssmmessages:CreateDataChannel', 'ssmmessages:OpenControlChannel',
+                'ssmmessages:OpenDataChannel']),
+        {'Effect': 'Deny', 'Action': ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:GetParametersByPath'], 'Resource': '*'}])
     r["SessionProfile"] = {"Type": "AWS::IAM::InstanceProfile", "Properties": {"Roles": [ref("SessionRole")]}}
     region_cond = {"StringEquals": {"aws:RequestedRegion": ref("AWS::Region")}}
     managed_cond = {"StringEquals": {"aws:RequestedRegion": ref("AWS::Region"), "ec2:ResourceTag/cloudhub:managed": "true"}}
@@ -114,7 +116,8 @@ def main():
         policy("ssm:SendCommand", sub("arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"), {"StringEquals": {"ssm:resourceTag/cloudhub:managed": "true"}}),
         policy(["scheduler:CreateSchedule"], sub("arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*")),
         policy("backup:StartBackupJob", att("BackupVault")),
-        policy(["backup:DescribeBackupJob", "backup:DeleteRecoveryPoint"], "*", region_cond),
+        policy(["backup:DescribeBackupJob", "backup:DeleteRecoveryPoint", 'backup:DescribeRecoveryPoint',
+                'backup:ListRecoveryPointsByBackupVault', 'backup:ListTags'], "*", region_cond),
         policy("iam:PassRole", att("EnvironmentCfRole"), {"StringEquals": {"iam:PassedToService": "cloudformation.amazonaws.com"}}),
         policy("iam:PassRole", att("SchedulerRole"), {"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}}),
         policy("iam:PassRole", att("BackupRole"), {"StringEquals": {"iam:PassedToService": "backup.amazonaws.com"}})]
@@ -156,6 +159,13 @@ def main():
     r["FailureMetric"] = {"Type": "AWS::Logs::MetricFilter", "Properties": {"LogGroupName": ref("WorkerFunctionLog"), "FilterPattern": '{ $.event = "CloudHubOperationFailed" }', "MetricTransformations": [{"MetricNamespace": "CloudHub", "MetricName": "OperationFailed", "MetricValue": "1"}]}}
     r["AlertTopic"] = {"Type": "AWS::SNS::Topic"}
     r["FailureAlarm"] = {"Type": "AWS::CloudWatch::Alarm", "Properties": {"Namespace": "CloudHub", "MetricName": "OperationFailed", "Statistic": "Sum", "Period": 60, "EvaluationPeriods": 1, "Threshold": 1, "ComparisonOperator": "GreaterThanOrEqualToThreshold", "TreatMissingData": "notBreaching", "AlarmActions": [ref("AlertTopic")]}}
+    r['ResidualMetric'] = {'Type': 'AWS::Logs::MetricFilter', 'Properties': {
+        'LogGroupName': ref('WorkerFunctionLog'), 'FilterPattern': '{ $.event = "CloudHubCleanupResidual" }',
+        'MetricTransformations': [{'MetricNamespace': 'CloudHub', 'MetricName': 'CleanupResidual', 'MetricValue': '1'}]}}
+    r['ResidualAlarm'] = {'Type': 'AWS::CloudWatch::Alarm', 'Properties': {
+        'Namespace': 'CloudHub', 'MetricName': 'CleanupResidual', 'Statistic': 'Sum', 'Period': 60,
+        'EvaluationPeriods': 1, 'Threshold': 1, 'ComparisonOperator': 'GreaterThanOrEqualToThreshold',
+        'TreatMissingData': 'notBreaching', 'AlarmActions': [ref('AlertTopic')]}}
     for name in ["ApiFunction", "WorkerFunction", "SweepFunction", "ExpiryFunction"]:
         r[name + "ErrorAlarm"] = {"Type": "AWS::CloudWatch::Alarm", "Properties": {"Namespace": "AWS/Lambda", "MetricName": "Errors", "Dimensions": [{"Name": "FunctionName", "Value": ref(name)}], "Statistic": "Sum", "Period": 60, "EvaluationPeriods": 1, "Threshold": 1, "ComparisonOperator": "GreaterThanOrEqualToThreshold", "TreatMissingData": "notBreaching", "AlarmActions": [ref("AlertTopic")]}}
     r['DlqAlarm']={'Type':'AWS::CloudWatch::Alarm','Properties':{'Namespace':'AWS/SQS','MetricName':'ApproximateNumberOfMessagesVisible',

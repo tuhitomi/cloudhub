@@ -6,6 +6,8 @@ ddb=boto3.client('dynamodb',config=Config(connect_timeout=1,read_timeout=2,retri
 def handler(event,context=None):
     claims=event.get('requestContext',{}).get('authorizer',{}).get('jwt',{}).get('claims',{})
     if claims.get('sub')!=os.environ['OWNER'] or claims.get('token_use')!='access':return reply(404,{'error':'NOT_FOUND'})
+    account=ddb.get_item(TableName=os.environ['MANAGEMENT'],Key={'pk':{'S':'U#'+os.environ['OWNER']}},ConsistentRead=True).get('Item',{})
+    if account.get('enabled',{}).get('BOOL') is False:return reply(403,{'error':'ACCOUNT_DISABLED'})
     meta=ddb.get_item(TableName=os.environ['MANAGEMENT'],Key={'pk':{'S':'E#'+os.environ['ENVIRONMENT']}},ConsistentRead=True).get('Item',{})
     if meta.get('status',{}).get('S')!='READY' or float(meta.get('deadline',{}).get('N','0'))<=time.time():return reply(409,{'error':'SESSION_UNAVAILABLE'})
     rows=[];params={'TableName':os.environ['DATA_TABLE'],'ConsistentRead':True}

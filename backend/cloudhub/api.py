@@ -19,8 +19,10 @@ def serialize(value):
     raise TypeError(type(value).__name__)
 
 def public(row):
-    result={k: v for k, v in row.items() if k not in {"pk", "version", "owner_sort", "restore_lock", "file",'data','warehouse_secret'}}
-    if row.get('kind')=='recovery':result['in_use']=bool(row.get('restore_lock') or row.get('export_lock') or row.get('delete_lock'))
+    result={k: v for k, v in row.items() if k not in {"pk", "version", "owner_sort", "restore_lock", "retirement_lock", "file",'data','warehouse_secret'}}
+    if row.get('kind')=='recovery':
+        result['in_use']=bool(row.get('restore_lock') or row.get('export_lock') or row.get('delete_lock'))
+        result['retirement_protected']=bool(row.get('retirement_lock'))
     return result
 
 def handler(event, context=None):

@@ -81,7 +81,7 @@ class PortalMixin:
                     raise HubError('RETRY_UNAVAILABLE','Không thể thử lại bước này. Kiểm tra/thu hồi nguồn trước khi tạo mới, hoặc đã đạt 3 lần thử.',409)
                 rp=self.store.get('R#'+op['recovery_point']) if op.get('recovery_point') else None
                 if op['action'] in {'delete_backup','export_backup'}:
-                    if not rp or rp.get('restore_lock') or rp.get('export_lock') or rp.get('delete_lock'):
+                    if not rp or rp.get('restore_lock') or rp.get('export_lock') or rp.get('delete_lock') or op['action']=='delete_backup' and rp.get('retirement_lock'):
                         raise HubError('RECOVERY_LOCKED','Bản sao đang được sử dụng.',409)
                     if op['action']=='export_backup' and (rp['status']!='AVAILABLE' or rp['retain_until']<=self.clock()):
                         raise HubError('RECOVERY_UNAVAILABLE','Bản sao không còn cho tải.',409)
@@ -94,6 +94,13 @@ class PortalMixin:
                     if env['status']=='DELETED' and op['action']!='audit' and op['action']!='cost':
                         raise HubError('INVALID_STATE','Nguồn đã thu hồi, không thử lại thao tác dữ liệu.',409)
                     env['lock']=oid
+                    if op['action']=='destroy' and phase=='DELETE' and op.get('recovery_point'):
+                        if (not rp or rp['status']!='AVAILABLE' or rp['retain_until']<=self.clock()
+                                or rp.get('delete_lock') or rp.get('owner_id')!=owner
+                                or rp.get('environment_id')!=env['environment_id']
+                                or rp.get('retirement_lock') not in {None,oid}):
+                            raise HubError('FINAL_BACKUP_UNAVAILABLE','Bản sao cuối cùng không còn hợp lệ. Giữ nguồn; tạo tác vụ thu hồi mới để sao lưu lại.',409)
+                        rp['retirement_lock']=oid
                     if op['action']=='restore':
                         if not rp or rp['status']!='AVAILABLE' or rp['retain_until']<=self.clock() or rp.get('restore_lock') or rp.get('export_lock') or rp.get('delete_lock'):
                             raise HubError('RECOVERY_UNAVAILABLE','Không thể dùng lại bản sao.',409)
@@ -109,7 +116,7 @@ class PortalMixin:
                     if not quote['approved']:raise HubError('PRICES_UNAPPROVED','Chưa phê duyệt dự toán bản sao.',409)
                     rows.extend(self.quota(owner,quote['total_milliusd'],0))
                     rid=ident('rp-',oid,'retry',str(op.get('generation',0)+1));now=int(self.clock())
-                    fresh=record('recovery',rid,owner,recovery_point=rid,environment_id=env['environment_id'],template_id=env['template_id'],status='PENDING',source=env.get('data_source') or env.get('bucket_name') or env.get('data_volume_id'),created_at=now,retain_until=now+7*86400,scope=SCOPES[env['template_id']],restore_verified=False,retry_of=op.get('recovery_point'))
+                    fresh=record('recovery',rid,owner,recovery_point=rid,environment_id=env['environment_id'],template_id=env['template_id'],status='PENDING',source=env.get('data_source') or env.get('bucket_name') or env.get('data_volume_id'),created_at=now,retain_until=now+7*86400,scope=SCOPES[env['template_id']],restore_verified=False,retry_of=op.get('recovery_point'),retirement_lock=oid if op['action']=='destroy' else None)
                     rows.append(fresh);op['recovery_point']=rid
                     for name in ['backup_job_id','backup_cursor','backup_verify_cursor']:op.pop(name,None)
                 op['phase']=phase;op['status']='QUEUED';op['attempts']=0
@@ -130,6 +137,8 @@ class PortalMixin:
             rp=self.owned('R',rid,owner)
             ipk,fp,old=self.idempotency(owner,key,rid+'/'+action,{})
             if old:return self.owned('O',old['operation_id'],owner)
+            if action=='delete_backup' and rp.get('retirement_lock'):
+                raise HubError('RECOVERY_LOCKED','Bản sao cuối cùng được giữ đến khi xác nhận thu hồi sạch môi trường.',409)
             if rp.get('restore_lock') or rp.get('export_lock') or rp.get('delete_lock') or rp['status'] not in ({'AVAILABLE','DELETE_FAILED'} if action=='delete_backup' else {'AVAILABLE'}):
                 raise HubError('RECOVERY_LOCKED','Bản sao đang được xử lý hoặc không sẵn sàng.',409)
             if action=='export_backup' and rp['retain_until']<=self.clock():

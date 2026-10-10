@@ -1,5 +1,7 @@
 # Báo cáo rà soát CloudHub
 
+> **Cập nhật nguồn 0.4.1 ngày 10/10/2026:** R01–R06 bên dưới là các phát hiện trên commit `cf52ef3` và đã được sửa trong mã. Xem [bản sửa và kiểm thử hồi quy](security-fixes.md). Báo cáo gốc được giữ làm lịch sử; AWS vẫn chưa chạy bản sửa và chưa hoàn thành nghiệm thu thực tế.
+
 Ngày tổng hợp: 10/10/2026 (Asia/Bangkok). Bằng chứng kiểm thử và quan sát AWS được thu thập ngày 09/10/2026. Phạm vi: mã nguồn, frontend, API, phân quyền, vòng đời môi trường, sao lưu/khôi phục, hạ tầng, kiểm thử và tài liệu trong `outputs/cloudhub`.
 
 ## Kết luận

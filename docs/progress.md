@@ -1,5 +1,7 @@
 # Báo cáo tổng hợp CloudHub — 09/10/2026
 
+Cập nhật ngày 10/10/2026: nguồn **0.4.1** sửa sáu phát hiện R01–R06; xem [chi tiết](security-fixes.md) và [kết quả kiểm tra mới nhất](local-check-results.json). Các số kiểm thử ở phần lịch sử bên dưới thuộc các phiên bản trước. Bản sửa chưa triển khai AWS; tài khoản vẫn đang xác minh trong lần kiểm tra 10/10, stack `cloudhub-demo` ROLLBACK_COMPLETE.
+
 Cập nhật nguồn 0.4.0: xem [báo cáo 10 điểm bổ sung](product-completion.md). Kiểm tra hiện tại: **108 Python local/mock/SDK tests + 8 DOM tests**, compile/syntax/OpenAPI/cfn-lint đều đạt. Bản mới chưa triển khai, AWS vẫn 0/20 vòng. Số 71 tests và trạng thái AWS bên dưới là kết quả giai đoạn trước.
 
 **Có mã nguồn cho cả 10 mẫu; đã triển khai mạng AWS nhưng control plane bị AWS chặn xác minh CloudFront.** Đã hoàn tất các phần làm độc lập tại workspace: frontend/backend/workflow/IaC, processor T01–T10, OpenAPI, bộ kiểm tra, CI, review dự toán, tài liệu vận hành và minh chứng. **AWS thật: 0/20 vòng, chưa đo SLA.** Mọi mẫu vẫn khóa với người dùng thường.

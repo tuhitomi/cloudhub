@@ -36,6 +36,11 @@ test('a recovery point in use disables download and delete, with honest native l
   const {portal,element}=setup();const card=element('article');portal.backupExtras(card,{recovery_point:'rp-id',template_id:'T01',status:'AVAILABLE',in_use:true,retain_until:Date.now()/1000+3600});
   assert.equal(card.querySelector('button').textContent,'Tải thông tin snapshot');assert.ok([...card.querySelectorAll('button')].every(value=>value.disabled));
 });
+test('a final retirement backup blocks deletion while still allowing download',()=>{
+  const {portal,element}=setup();const card=element('article');portal.backupExtras(card,{recovery_point:'rp-id',template_id:'T01',status:'AVAILABLE',retirement_protected:true,retain_until:Date.now()/1000+3600});
+  const buttons=card.querySelectorAll('button');assert.equal(buttons[0].disabled,false);assert.equal(buttons[1].disabled,true);assert.match(card.textContent,/được bảo vệ/);
+});
+
 test('failed provisioning cannot retry; cancelling and native export have separate controls',()=>{
   const {portal,element}=setup();const card=element('article');portal.operationExtras(card,{operation_id:'op-id',status:'FAILED',phase:'CREATE'});
   const buttons=card.querySelectorAll('button');assert.equal(buttons[0].disabled,true);assert.equal(buttons[1].textContent,'Đóng tác vụ lỗi');

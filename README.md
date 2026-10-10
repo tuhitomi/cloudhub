@@ -2,9 +2,9 @@
 
 Repository chỉ chứa file văn bản: mã nguồn, cấu hình mẫu, IaC, kiểm thử và tài liệu. Ảnh minh chứng, file nén, dependencies, credentials và cấu hình triển khai riêng được giữ ngoài Git. Một số đường dẫn minh chứng trong báo cáo cũ chỉ có ở workspace gốc.
 
-**Đánh giá ngày 10/10/2026:** chưa sẵn sàng nghiệm thu hoặc mở dùng chung; sáu vấn đề về bảo vệ backup, phân quyền và cảnh báo còn chưa sửa. Xem [báo cáo rà soát](docs/review-report.md) và các tình huống tái hiện kèm theo.
+**Nguồn 0.4.1 ngày 10/10/2026:** đã sửa sáu vấn đề R01–R06 về bảo vệ backup, phân quyền và cảnh báo. Xem [chi tiết bản sửa](docs/security-fixes.md) và [báo cáo rà soát ban đầu](docs/review-report.md). Chưa triển khai bản sửa lên AWS, chưa đủ minh chứng nghiệm thu vận hành.
 
-Nguồn/API **0.4.0** bổ sung quản trị môi trường/tài khoản/hạn mức, cảnh báo sắp hết hạn, luồng mật khẩu, thử lại/đóng tác vụ lỗi, xóa/export bản sao, lịch sử/bộ lọc và đối soát chi phí tùy chọn. [Báo cáo 10 điểm và giới hạn thực tế](docs/product-completion.md). Phiên bản mới chưa deploy AWS.
+Nguồn/API **0.4.1** giữ các chức năng đã bổ sung ở 0.4.0: quản trị môi trường/tài khoản/hạn mức, cảnh báo sắp hết hạn, luồng mật khẩu, thử lại/đóng tác vụ lỗi, xóa/export bản sao, lịch sử/bộ lọc và đối soát chi phí tùy chọn. [Báo cáo 10 điểm và giới hạn thực tế](docs/product-completion.md). Phiên bản mới chưa deploy AWS.
 
 Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diện tiếng Việt, Cognito, HTTP API, Lambda, DynamoDB, Standard Step Functions, Scheduler, CloudFormation và bản sao theo mẫu. **Mạng AWS đã triển khai; control plane rollback vì AWS yêu cầu xác minh CloudFront. 0/20 vòng AWS thật.** Tất cả mẫu vẫn khóa với người dùng thường.
 

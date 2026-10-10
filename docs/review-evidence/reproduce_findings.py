@@ -1,4 +1,7 @@
-"""Read-only project review: isolated mocks, no AWS calls or source edits.
+"""Historical reproductions for commit cf52ef3 (before R01–R06 were fixed).
+
+Current behavior is covered by tests/test_review_fixes.py. This archived script
+is expected to stop when run on fixed source; it is not a current validation suite.
 
 Successful execution CONFIRMS current defects; it is not a passing acceptance suite.
 """

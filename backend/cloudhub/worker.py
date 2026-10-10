@@ -65,6 +65,8 @@ class Worker:
                 return {"operation_id": oid, "done": True, "failed": False}
             elif op["phase"] == "BACKUP":
                 rp = s.store.get("R#" + op["recovery_point"])
+                if op['action'] == 'destroy':
+                    rp['retirement_lock'] = oid
                 if self.driver.backup(env, op, rp):
                     rp["status"], rp["completed_at"] = "AVAILABLE", int(s.clock())
                     op["phase"] = "DELETE" if op["action"] == "destroy" else "RESUME"
@@ -84,8 +86,9 @@ class Worker:
                     return {"operation_id": oid, "done": True, "failed": False,
                             "expiry_operation_id": expiry["operation_id"] if expiry else None}
             elif op["phase"] == "DELETE":
-                # A failed final backup never reaches this branch.
-                if op.get("recovery_point") is None:
+                if op.get('recovery_point'):
+                    s.retirement_recovery(op, env)
+                else:
                     # CreateStack may have succeeded even when its HTTP response was lost.
                     # Never infer "no source" from incomplete DynamoDB metadata.
                     self.driver.inventory(env)
@@ -101,8 +104,15 @@ class Worker:
                 env["status"] = "RESIDUAL" if report["residual"] or report["unknown"] else "DELETED"
                 if env['status']=='DELETED':env['retired_at']=env.get('retired_at',int(s.clock()))
                 env["needs_admin"] = env["status"] == "RESIDUAL"
-                s.finish(op, env)
-                return {"operation_id": oid, "done": True, "failed": False}
+                residual = env['needs_admin']
+                if residual:
+                    op['error'] = 'CLEANUP_RESIDUAL: còn tài nguyên dư hoặc chưa xác minh được; giữ hạn mức và bản sao.'
+                s.finish(op, env, 'FAILED' if residual else 'SUCCEEDED')
+                if residual:
+                    print(json.dumps({'event': 'CloudHubCleanupResidual', 'operation_id': oid,
+                                      'environment_id': env['environment_id'],
+                                      'residual_count': len(report['residual']), 'unknown_count': len(report['unknown'])}))
+                return {"operation_id": oid, "done": True, "failed": residual}
             else:
                 raise HubError("INVALID_PHASE", "Trạng thái tác vụ không xác định.", 409)
             if old_phase != op["phase"]:
@@ -136,6 +146,8 @@ class Worker:
                 if rp.get(lock)!=op['operation_id'] or rp.get('restore_lock'):
                     raise HubError('RECOVERY_LOCKED','Khóa bản sao đã thay đổi.',409)
                 if op['action']=='delete_backup':
+                    if rp.get('retirement_lock'):
+                        raise HubError('RECOVERY_LOCKED','Bản sao đang bảo vệ nguồn chưa thu hồi sạch.',409)
                     if not self.driver.expire_backup(rp):
                         s.save(op,rp);return {'operation_id':op['operation_id'],'done':False,'failed':False}
                     rp.update(status='DELETED',deleted_at=int(s.clock()),delete_lock=None)
@@ -179,7 +191,7 @@ class Worker:
         env["status"] = "CREATE_FAILED" if op["action"] in {"create", "restore"} else "ERROR_RETAINED"
         if op["action"] in {"backup", "destroy"} and op.get("recovery_point"):
             rp = s.store.get("R#" + op["recovery_point"])
-            if rp["status"] != "AVAILABLE":
+            if rp and rp["status"] not in {'AVAILABLE', 'DELETED', 'EXPIRED', 'DELETING'}:
                 rp["status"], rp["error"] = "FAILED", op["error"]
                 s.save(rp)
             # Source retained. Attempt restart only; a restart failure is also recorded.

@@ -169,7 +169,7 @@ class Service(PortalMixin):
                     template_id=env["template_id"], status="PENDING", source=env.get('data_source') or env.get("bucket_name") or env.get("data_volume_id"),
                     created_at=now, retain_until=now + 7 * 86400,
                     scope=SCOPES[env['template_id']],
-                    restore_verified=False))
+                    restore_verified=False, retirement_lock=oid if action == 'destroy' else None))
             self.store.commit(rows, expected(*rows))
             return self.store.get(op["pk"])
         return retry(transaction)
@@ -266,12 +266,34 @@ class Service(PortalMixin):
     def save(self, *rows):
         self.store.commit(list(rows), expected(*rows))
 
+    def retirement_recovery(self, op, env):
+        """Fence legacy points too before any irreversible source deletion."""
+        rp = self.store.get('R#' + op['recovery_point'])
+        if (not rp or rp['status'] != 'AVAILABLE' or rp['retain_until'] <= self.clock()
+                or rp.get('owner_id') != env['owner_id']
+                or rp.get('environment_id') != env['environment_id']
+                or rp.get('delete_lock')
+                or rp.get('retirement_lock') not in {None, op['operation_id']}):
+            raise HubError('FINAL_BACKUP_UNAVAILABLE',
+                           'Bản sao cuối cùng không còn hợp lệ. Giữ nguồn; tạo tác vụ thu hồi mới để sao lưu lại.', 409)
+        if not rp.get('retirement_lock'):
+            rp['retirement_lock'] = op['operation_id']
+            self.save(rp)
+        return rp
+
     def finish(self, op, env, status="SUCCEEDED"):
         op["status"], op["finished_at"] = status, int(self.clock())
         env["lock"] = None
         if status=='SUCCEEDED' and op['action'] in {'create','restore','backup','write_file','put_record','list_records','load_dataset','query_demo'}:
             env['status']='READY';env['needs_admin']=False
         rows = [op, env]
+        if env['status'] == 'DELETED':
+            # Failed/cancelled retirement points stay protected until a later
+            # retirement or audit confirms that no source resources remain.
+            for rp in self.store.scan_kind('recovery'):
+                if rp['environment_id'] == env['environment_id'] and rp.get('retirement_lock'):
+                    rp['retirement_lock'] = None
+                    rows.append(rp)
         if op["action"] == "restore":
             rp = self.store.get("R#" + op["recovery_point"])
             rp["restore_lock"] = None

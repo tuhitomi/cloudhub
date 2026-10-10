@@ -468,9 +468,34 @@
             }
           ]
         },
-        "ManagedPolicyArns": [
+        "Policies": [
           {
-            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+            "PolicyName": "cloudhub",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:UpdateInstanceInformation",
+                    "ssmmessages:CreateControlChannel",
+                    "ssmmessages:CreateDataChannel",
+                    "ssmmessages:OpenControlChannel",
+                    "ssmmessages:OpenDataChannel"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Deny",
+                  "Action": [
+                    "ssm:GetParameter",
+                    "ssm:GetParameters",
+                    "ssm:GetParametersByPath"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
           }
         ]
       }
@@ -729,6 +754,9 @@
                   "dynamodb:LeadingKeys": [
                     {
                       "Fn::Sub": "E#${!aws:PrincipalTag/cloudhub:environment}"
+                    },
+                    {
+                      "Fn::Sub": "U#${!aws:PrincipalTag/cloudhub:owner}"
                     }
                   ]
                 }
@@ -2060,7 +2088,10 @@
                 "Effect": "Allow",
                 "Action": [
                   "backup:DescribeBackupJob",
-                  "backup:DeleteRecoveryPoint"
+                  "backup:DeleteRecoveryPoint",
+                  "backup:DescribeRecoveryPoint",
+                  "backup:ListRecoveryPointsByBackupVault",
+                  "backup:ListTags"
                 ],
                 "Resource": "*",
                 "Condition": {
@@ -2796,7 +2827,10 @@
                 "Effect": "Allow",
                 "Action": [
                   "backup:DescribeBackupJob",
-                  "backup:DeleteRecoveryPoint"
+                  "backup:DeleteRecoveryPoint",
+                  "backup:DescribeRecoveryPoint",
+                  "backup:ListRecoveryPointsByBackupVault",
+                  "backup:ListTags"
                 ],
                 "Resource": "*",
                 "Condition": {
@@ -3371,6 +3405,40 @@
       "Properties": {
         "Namespace": "CloudHub",
         "MetricName": "OperationFailed",
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "ResidualMetric": {
+      "Type": "AWS::Logs::MetricFilter",
+      "Properties": {
+        "LogGroupName": {
+          "Ref": "WorkerFunctionLog"
+        },
+        "FilterPattern": "{ $.event = \"CloudHubCleanupResidual\" }",
+        "MetricTransformations": [
+          {
+            "MetricNamespace": "CloudHub",
+            "MetricName": "CleanupResidual",
+            "MetricValue": "1"
+          }
+        ]
+      }
+    },
+    "ResidualAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "CloudHub",
+        "MetricName": "CleanupResidual",
         "Statistic": "Sum",
         "Period": 60,
         "EvaluationPeriods": 1,

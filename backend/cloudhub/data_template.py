@@ -6,7 +6,7 @@ def data_template(env,settings,recovery=None):
         'KeySchema':[{'AttributeName':'row_id','KeyType':'HASH'}],'AttributeDefinitions':[{'AttributeName':'row_id','AttributeType':'S'}],
         'SSESpecification':{'SSEEnabled':True},'Tags':tags(env)}}}
     r['ReadRole']=role(env,settings,'lambda.amazonaws.com',[
-        allow('dynamodb:Scan',att('DataTable')),allow('dynamodb:GetItem',settings['management_table_arn'],{'ForAllValues:StringEquals':{'dynamodb:LeadingKeys':['E#'+env['environment_id']]}}),
+        allow('dynamodb:Scan',att('DataTable')),allow('dynamodb:GetItem',settings['management_table_arn'],{'ForAllValues:StringEquals':{'dynamodb:LeadingKeys':['E#'+env['environment_id'],'U#'+env['owner_id']]}}),
         allow(['logs:CreateLogStream','logs:PutLogEvents'],sub('arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/'+name(env,'-data')+':*'))])
     r['ReadFunction']={'Type':'AWS::Lambda::Function','Properties':{'FunctionName':name(env,'-data'),'Runtime':'python3.13','Handler':'index.handler',
         'Role':att('ReadRole'),'MemorySize':128,'Timeout':5,

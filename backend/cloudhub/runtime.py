@@ -90,16 +90,16 @@ def sweep_handler(event, context=None):
             errors.append({"operation_id": op["operation_id"], "error": type(exc).__name__})
     for rp in service.store.scan_kind("recovery"):
         try:
-            expirable = {'AVAILABLE','EXPIRING','FAILED'}
-            if rp["status"] in expirable and rp["retain_until"] <= service.clock() and not (rp.get("restore_lock") or rp.get('export_lock') or rp.get('delete_lock')):
+            expirable = {'AVAILABLE','EXPIRING','FAILED','DELETE_FAILED'}
+            if rp["status"] in expirable and rp["retain_until"] <= service.clock() and not (rp.get("restore_lock") or rp.get('export_lock') or rp.get('delete_lock') or rp.get('retirement_lock')):
                 # Fence restore against retention expiry before touching AWS.
                 rp["status"] = "EXPIRING"
                 service.save(rp)
+                rp = service.store.get(rp['pk'])
                 deleted = driver.expire_backup(rp)
                 if deleted:
-                    rp = service.store.get(rp["pk"])
                     rp["status"] = "EXPIRED"
-                    service.save(rp)
+                service.save(rp)
         except Exception as exc:
             errors.append({"recovery_point": rp["recovery_point"], "error": type(exc).__name__})
     if errors:

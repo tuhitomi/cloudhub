@@ -311,16 +311,102 @@ class AWSDriver:
                 raise
 
     def expire_backup(self, rp):
-        if not rp.get("snapshot_id"):
-            return True
+        """Missing local metadata is not evidence that AWS has no backup."""
+        arn = rp.get('aws_recovery_point_arn')
+        terminal_without_point = False
+        if not arn and rp.get('backup_job_id'):
+            job = self.aws_backup.describe_backup_job(BackupJobId=rp['backup_job_id'])
+            source = rp.get('source')
+            if source and job.get('ResourceArn') != self._volume_arn(source):
+                raise HubError('RESOURCE_SCOPE_MISMATCH', 'Backup job thuộc nguồn khác.', 409)
+            if job['State'] not in {'COMPLETED', 'FAILED', 'ABORTED', 'EXPIRED', 'PARTIAL'}:
+                return False
+            arn = job.get('RecoveryPointArn')
+            terminal_without_point = job['State'] in {'FAILED', 'ABORTED', 'EXPIRED'} and not arn
+        if not arn and rp.get('snapshot_id'):
+            arn = self._snapshot_prefix() + rp['snapshot_id']
+        targets = set(rp.get('cleanup_arns', []))
+        if arn:
+            targets.add(arn)
+        if not targets:
+            # Lost StartBackupJob responses have no job ID. Discover only points
+            # whose three ownership tags match; never delete by volume alone.
+            args = {'BackupVaultName': self.settings['backup_vault']}
+            while True:
+                page = self.aws_backup.list_recovery_points_by_backup_vault(**args)
+                for point in page['RecoveryPoints']:
+                    candidate = point['RecoveryPointArn']
+                    if not candidate.startswith(self._snapshot_prefix()):
+                        continue
+                    point_tags = self.aws_backup.list_tags(ResourceArn=candidate)['Tags']
+                    if self._recovery_tags_match(point_tags, rp):
+                        targets.add(candidate)
+                if not page.get('NextToken'):
+                    break
+                args['NextToken'] = page['NextToken']
+            if not targets:
+                snapshots = self.ec2.describe_snapshots(
+                    OwnerIds=[self.settings['account_id']],
+                    Filters=[{'Name': 'tag:cloudhub:' + key, 'Values': [rp[field]]}
+                             for key, field in [('recovery', 'recovery_point'), ('owner', 'owner_id'),
+                                                ('environment', 'environment_id')]])['Snapshots']
+                for snapshot in snapshots:
+                    tags = {tag['Key']: tag['Value'] for tag in snapshot.get('Tags', [])}
+                    if self._recovery_tags_match(tags, rp):
+                        targets.add(self._snapshot_prefix() + snapshot['SnapshotId'])
+            if not targets:
+                if terminal_without_point:
+                    return True
+                raise HubError('RECOVERY_UNCONFIRMED',
+                               'Chưa đối chiếu được backup job hoặc recovery point; không đánh dấu đã xóa.', 409)
+        rp['cleanup_arns'] = sorted(targets)
+        absent = True
+        for target in sorted(targets):
+            # Do not short-circuit: each owned point needs its deletion advanced.
+            absent = self._expire_snapshot(target, rp) and absent
+        return absent
+
+    def _snapshot_prefix(self):
+        return 'arn:aws:ec2:' + self.settings['region'] + ':' + self.settings['account_id'] + ':snapshot/'
+
+    def _volume_arn(self, volume):
+        return 'arn:aws:ec2:' + self.settings['region'] + ':' + self.settings['account_id'] + ':volume/' + volume
+
+    @staticmethod
+    def _recovery_tags_match(tags, rp):
+        return all(tags.get('cloudhub:' + key) == rp[field] for key, field in
+                   [('recovery', 'recovery_point'), ('owner', 'owner_id'), ('environment', 'environment_id')])
+
+    def _expire_snapshot(self, arn, rp):
+        if not arn.startswith(self._snapshot_prefix() + 'snap-'):
+            raise HubError('RESOURCE_SCOPE_MISMATCH', 'Recovery point ngoài tài khoản/region hoặc không phải EBS.', 409)
+        point = None
         try:
-            snap = self.ec2.describe_snapshots(SnapshotIds=[rp["snapshot_id"]])["Snapshots"][0]
+            point = self.aws_backup.describe_recovery_point(
+                BackupVaultName=self.settings['backup_vault'], RecoveryPointArn=arn)
+            point_tags = self.aws_backup.list_tags(ResourceArn=arn)['Tags']
+            if not self._recovery_tags_match(point_tags, rp):
+                raise HubError('RESOURCE_SCOPE_MISMATCH', 'Recovery point ngoài phạm vi chính sách.', 409)
+            if rp.get('source') and point.get('ResourceArn') != self._volume_arn(rp['source']):
+                raise HubError('RESOURCE_SCOPE_MISMATCH', 'Recovery point thuộc volume khác.', 409)
         except Exception as exc:
-            if code(exc) == "InvalidSnapshot.NotFound":
+            if code(exc) != 'ResourceNotFoundException':
+                raise
+            if point is not None:
+                return False  # Deletion raced ListTags; check again next poll.
+        snap = None
+        try:
+            snapshots = self.ec2.describe_snapshots(SnapshotIds=[arn.rsplit('/', 1)[1]])['Snapshots']
+            snap = snapshots[0] if snapshots else None
+        except Exception as exc:
+            if code(exc) != 'InvalidSnapshot.NotFound':
+                raise
+        if snap and not self._recovery_tags_match({t['Key']: t['Value'] for t in snap.get('Tags', [])}, rp):
+            raise HubError('RESOURCE_SCOPE_MISMATCH', 'Snapshot ngoài phạm vi chính sách.', 409)
+        if point is None:
+            if snap is None:
                 return True
-            raise
-        tags = {t["Key"]: t["Value"] for t in snap.get("Tags", [])}
-        if tags.get("cloudhub:recovery") != rp["recovery_point"] or tags.get("cloudhub:owner") != rp["owner_id"] or tags.get("cloudhub:environment") != rp["environment_id"]:
-            raise HubError("RESOURCE_SCOPE_MISMATCH", "Snapshot ngoài phạm vi chính sách.", 409)
-        self.aws_backup.delete_recovery_point(BackupVaultName=self.settings["backup_vault"], RecoveryPointArn=rp["aws_recovery_point_arn"])
+            raise HubError('RECOVERY_UNCONFIRMED', 'Snapshot vẫn còn nhưng vault không có recovery point; cần xử lý trước khi báo đã xóa.', 409)
+        if point.get('Status') != 'DELETING':
+            self.aws_backup.delete_recovery_point(BackupVaultName=self.settings['backup_vault'], RecoveryPointArn=arn)
         return False

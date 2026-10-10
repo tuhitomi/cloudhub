@@ -1,0 +1,8 @@
+{
+  "configured": true,
+  "apiBase": "https://p3i0opiv22.execute-api.ap-southeast-1.amazonaws.com",
+  "clientId": "7o8f1hkkid5kmjbbcmek5elup",
+  "cognitoDomain": "https://cloudhub-pages-live-133130236086.auth.ap-southeast-1.amazoncognito.com",
+  "redirectUri": "https://tuhitomi.github.io/cloudhub/",
+  "region": "ap-southeast-1"
+}

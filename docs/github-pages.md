@@ -1,6 +1,6 @@
 # GitHub Pages: giao diện và backend riêng
 
-Pages xuất bản giao diện tĩnh và 10 mẫu từ danh mục mã nguồn. Đây là bản xem trước, không phải minh chứng CloudHub đã vận hành trên AWS. Đăng nhập, hạn mức, dự toán, dữ liệu môi trường, sao lưu và mọi thao tác tạo/thu hồi vẫn bị khóa khi backend chưa triển khai.
+Pages xuất bản giao diện tĩnh; API, đăng nhập và xử lý môi trường chạy ở AWS. Cấu hình công khai hiện trỏ tới backend `cloudhub-pages-live` tại Singapore. Đăng nhập và các màn hình quản lý dùng API thật. Mỗi mẫu chỉ được mở tạo sau khi kiểm thử vòng đời AWS và cập nhật gate phía server; triển khai backend thành công chưa chứng minh cả 10 mẫu đã chạy được.
 
 Repo nguồn tiếp tục private. Workflow `Publish CloudHub website` có hai chế độ. Khi chưa có `config/pages-public.json`, workflow giữ bản xem trước: chỉ upload `index.html`, `style.css`, `app.js`, `config.js`, `catalog.json` và `.nojekyll`; cấu hình được tạo mới với `configured: false`. Không lấy `frontend/config.js` trên máy.
 
@@ -30,3 +30,5 @@ python scripts/build_pages_live.py --config config/pages-public.json --out /abso
 Chỉ commit `pages-public.json` gồm sáu trường được kiểm tra: configured, apiBase, clientId, cognitoDomain, redirectUri, region. Đây là metadata endpoint và client Cognito không có secret; không thêm user, mật khẩu, access key, token, outputs đầy đủ hoặc evidence. Builder từ chối trường khác, endpoint sai region và thư mục có file ngoài allowlist. Bản hoạt động chỉ xuất bản `index.html`, `style.css`, `app.js`, `portal.js`, `config.js`, `.nojekyll`; binary/backend vẫn nằm ngoài repository và Pages.
 
 Backend tiếp tục xác thực JWT, kiểm owner/admin, quota, dự toán và gate mẫu. `verified_templates=[]` cho đến khi có bằng chứng vòng đời AWS thật. Không mở nút tạo chỉ để minh họa. T06 cần image ECR được review; T10 cần kiểm plan/quota riêng. SNS cần người nhận xác nhận; Cost Explorer chỉ bật sau review chi phí. Khi cần trở lại bản xem trước, bỏ cấu hình công khai trong một commit rồi chạy workflow.
+
+API Lambda dùng 512 MiB và timeout 30 giây để chứa thời gian khởi động SDK; tác vụ tài nguyên dài vẫn trả 202 và chạy qua Step Functions. Không dùng timeout cấu hình làm minh chứng đáp ứng dưới 2 giây: cần đo phản hồi API thật, gồm cả lần khởi động nguội.

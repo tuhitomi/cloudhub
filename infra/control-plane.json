@@ -1433,8 +1433,8 @@
         "Architectures": [
           "x86_64"
         ],
-        "Timeout": 5,
-        "MemorySize": 256,
+        "Timeout": 30,
+        "MemorySize": 512,
         "Environment": {
           "Variables": {
             "TABLE_NAME": {
@@ -1524,7 +1524,10 @@
               },
               {
                 "Effect": "Allow",
-                "Action": "s3:GetObjectVersion",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:GetObjectVersion"
+                ],
                 "Resource": {
                   "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*"
                 }

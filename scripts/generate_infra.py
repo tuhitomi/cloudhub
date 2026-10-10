@@ -184,7 +184,7 @@ def build_template(frontend_url=None, existing_data=None):
     for name, suffix, handler, statements in [
         ("ApiFunction", "api", "cloudhub.api.handler", [data_policy, start_policy,
             policy(["s3:GetBucketTagging", "s3:ListBucket"], env_bucket),
-            policy('s3:GetObjectVersion',env_objects),
+            policy(['s3:GetObject','s3:GetObjectVersion'],env_objects),
             policy("ec2:DescribeKeyPairs", condition=region_cond),
             policy("ssm:GetParameter", sub("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ec2/keypair/*"))]),
         ("WorkerFunction", "worker", "cloudhub.worker.handler", worker_policies),
@@ -195,7 +195,7 @@ def build_template(frontend_url=None, existing_data=None):
         if name in {"WorkerFunction", "SweepFunction", "ApiFunction"}: env["DRIVER_SETTINGS"] = sub(json.dumps(settings,separators=(',',':')))
         r[name] = {"Type": "AWS::Serverless::Function", "Properties": {
             "FunctionName": sub("${AWS::StackName}-" + suffix), "CodeUri": "../backend/", "Handler": handler, "Runtime": "python3.13", "Architectures": ["x86_64"],
-            "Timeout": 60 if name != "ApiFunction" else 5, "MemorySize": 256,
+            "Timeout": 60 if name != "ApiFunction" else 30, "MemorySize": 512 if name == "ApiFunction" else 256,
             "Environment": {"Variables": env}, "Policies": [{"Version": "2012-10-17", "Statement": statements}]}}
         r[name + "Log"] = {"Type": "AWS::Logs::LogGroup", "Properties": {"LogGroupName": sub("/aws/lambda/${AWS::StackName}-" + suffix), "RetentionInDays": 14}}
     routes = [("GET", "/templates"), ("POST", "/estimates"), ("GET", "/environments"), ("POST", "/environments"),

@@ -46,6 +46,14 @@ class ExternalFrontendTests(unittest.TestCase):
         start = next(p for p in statements if p.get('Action') == 'backup:StartBackupJob')
         self.assertEqual(start['Resource'], {'Fn::GetAtt': ['BackupVault', 'BackupVaultArn']})
 
+    def test_share_can_head_current_object_and_read_fixed_version(self):
+        template = build_template('https://example.github.io/cloudhub/')
+        statements = template['Resources']['ApiFunction']['Properties']['Policies'][0]['Statement']
+        scoped = [p for p in statements if p.get('Resource') == {'Fn::Sub': 'arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*'}]
+        actions = {action for p in scoped for action in (p['Action'] if isinstance(p['Action'], list) else [p['Action']])}
+        self.assertTrue({'s3:GetObject', 's3:GetObjectVersion'} <= actions)
+        self.assertFalse({'s3:PutObject', 's3:DeleteObject'} & actions)
+
     def test_retained_data_has_no_duplicate_creation_or_dangling_attributes(self):
         names = {'Table': 'cloudhub-retained-table', 'BackupVault': 'cloudhub-retained-data',
                  'S3BackupBucket': 'cloudhub-retained-bucket'}

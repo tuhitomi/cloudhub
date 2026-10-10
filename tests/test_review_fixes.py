@@ -196,7 +196,10 @@ class ValidationAuthorizationTests(unittest.TestCase):
 
 class DataApiAccountTests(unittest.TestCase):
     def setUp(self):
-        self.module = importlib.import_module('cloudhub.data_api_app')
+        # Importing Lambda's module-level client must not require credentials or
+        # a default region on an ordinary developer machine or GitHub runner.
+        with patch('boto3.client', return_value=Mock()):
+            self.module = importlib.import_module('cloudhub.data_api_app')
         self.ddb = Mock()
         patcher = patch.object(self.module, 'ddb', self.ddb)
         patcher.start()

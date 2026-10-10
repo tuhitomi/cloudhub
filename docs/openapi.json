@@ -2863,7 +2863,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Returns 409 while this recovery point protects a source whose cleanup has not been confirmed."
       }
     },
     "/recovery-points/{recovery_point}/export": {
@@ -5044,6 +5045,10 @@
           "in_use": {
             "type": "boolean",
             "description": "Restore, export or delete lock is held."
+          },
+          "retirement_protected": {
+            "type": "boolean",
+            "description": "Final backup deletion and retention expiry are blocked until source cleanup is confirmed."
           }
         }
       },

@@ -66,4 +66,6 @@ def extend(paths,schemas,operation,param,ref):
     props.update({'failed_phase':{'type':'string'},'admin_actor':{'type':'string'},'admin_reason':{'type':'string'},'cancel_note':{'type':'string'}})
     schemas['RecoveryPoint']['properties']['status']['enum']+=['DELETING','DELETE_FAILED','DELETED']
     schemas['RecoveryPoint']['properties']['in_use']={'type':'boolean','description':'Restore, export or delete lock is held.'}
+    schemas['RecoveryPoint']['properties']['retirement_protected']={'type':'boolean','description':'Final backup deletion and retention expiry are blocked until source cleanup is confirmed.'}
+    paths['/recovery-points/{recovery_point}/delete']['post']['description']='Returns 409 while this recovery point protects a source whose cleanup has not been confirmed.'
     schemas['Environment']['properties'].update({'retired_at':{'type':'integer'},'cost_report':ref('CostReport')})

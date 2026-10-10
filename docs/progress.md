@@ -1,5 +1,11 @@
 # Báo cáo tổng hợp CloudHub — 09/10/2026
 
+Cập nhật triển khai dự phòng 10/10/2026: [website GitHub Pages](https://tuhitomi.github.io/cloudhub/) đã kết nối stack AWS `cloudhub-pages-live` (UPDATE_COMPLETE) tại ap-southeast-1. Đăng nhập Cognito, danh mục, hạn mức và giao diện quản trị đã được kiểm tra trên website thật. Tài khoản quản trị đã có thư mời Cognito. Kiểm tra local hiện tại: 149 Python và 9 DOM tests đạt; CI và xuất bản Pages đã đạt ở commit kết nối backend. SNS đã có đăng ký email CONFIRMED; cảnh báo thử từ website trả Message ID, nhưng chưa xác minh người nhận đã nhận thư. Vòng đời AWS đang được kiểm tra riêng và gate vẫn chỉ mở theo bằng chứng; chưa nghiệm thu đủ 20 vòng/SLA. Xem [triển khai Pages](github-pages.md) và README cho trạng thái hiện hành.
+
+## Lịch sử trước triển khai dự phòng
+
+Các trạng thái rollback, không có URL và số 0/20 bên dưới là hồ sơ của lần triển khai gốc, không phản ánh trạng thái website dự phòng hiện tại.
+
 Cập nhật ngày 10/10/2026: nguồn **0.4.1** sửa sáu phát hiện R01–R06; xem [chi tiết](security-fixes.md) và [kết quả kiểm tra mới nhất](local-check-results.json). Các số kiểm thử ở phần lịch sử bên dưới thuộc các phiên bản trước. Bản sửa chưa triển khai AWS; tài khoản vẫn đang xác minh trong lần kiểm tra 10/10, stack `cloudhub-demo` ROLLBACK_COMPLETE.
 
 Cập nhật nguồn 0.4.0: xem [báo cáo 10 điểm bổ sung](product-completion.md). Kiểm tra hiện tại: **108 Python local/mock/SDK tests + 8 DOM tests**, compile/syntax/OpenAPI/cfn-lint đều đạt. Bản mới chưa triển khai, AWS vẫn 0/20 vòng. Số 71 tests và trạng thái AWS bên dưới là kết quả giai đoạn trước.

@@ -56,12 +56,14 @@ def download(service, owner, oid, settings, client=None):
     if not key.startswith('recovery/'+rp['recovery_point']+'/exports/'+oid+'.'):
         raise HubError('RESOURCE_SCOPE_MISMATCH','Đường dẫn bản tải không hợp lệ.',409)
     import boto3
-    s3=client or boto3.client('s3')
+    from botocore.config import Config
+    s3=client or boto3.client('s3',region_name=settings.get('region'),config=Config(signature_version='s3v4',
+        s3={'addressing_style':'virtual'},connect_timeout=1,read_timeout=2,retries={'total_max_attempts':1}))
     info=s3.head_object(Bucket=settings['s3_backup_bucket'],Key=key,ExpectedBucketOwner=settings['account_id'])
     attrs=info.get('Metadata',{})
     if attrs.get('cloudhub-owner')!=owner or attrs.get('cloudhub-recovery')!=rp['recovery_point'] or attrs.get('cloudhub-environment')!=rp['environment_id']:
         raise HubError('RESOURCE_SCOPE_MISMATCH','File xuất không thuộc bản sao.',409)
-    ttl=max(1,min(900,int(rp['retain_until']-service.clock())))
+    ttl=max(1,min(900,int(float(rp['retain_until'])-float(service.clock()))))
     url=s3.generate_presigned_url('get_object',Params={'Bucket':settings['s3_backup_bucket'],'Key':key,
         'ResponseContentDisposition':'attachment; filename="'+result['filename']+'"'},ExpiresIn=ttl)
     return {'url':url,'expires_at':int(service.clock())+ttl,'filename':result['filename'],'label':result['label']}

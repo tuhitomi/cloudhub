@@ -2,13 +2,13 @@
 
 Repository chỉ chứa file văn bản: mã nguồn, cấu hình mẫu, IaC, kiểm thử và tài liệu. Ảnh minh chứng, file nén, dependencies, credentials và cấu hình triển khai riêng được giữ ngoài Git. Một số đường dẫn minh chứng trong báo cáo cũ chỉ có ở workspace gốc.
 
-**Nguồn 0.4.1 ngày 10/10/2026:** đã sửa sáu vấn đề R01–R06 về bảo vệ backup, phân quyền và cảnh báo. Xem [chi tiết bản sửa](docs/security-fixes.md) và [báo cáo rà soát ban đầu](docs/review-report.md). Chưa triển khai bản sửa lên AWS, chưa đủ minh chứng nghiệm thu vận hành.
+**Website hoạt động:** [CloudHub](https://tuhitomi.github.io/cloudhub/) dùng GitHub Pages cho giao diện và stack AWS `cloudhub-pages-live` cho Cognito, API và xử lý tài nguyên tại ap-southeast-1. Backend đã CREATE_COMPLETE rồi UPDATE_COMPLETE; đã xác minh đăng nhập, hạn mức và màn hình quản trị qua website thật. Các mẫu được mở dần sau kiểm thử vòng đời; chưa đủ minh chứng nghiệm thu toàn bộ 10 mẫu và SLA.
 
-Nguồn/API **0.4.1** giữ các chức năng đã bổ sung ở 0.4.0: quản trị môi trường/tài khoản/hạn mức, cảnh báo sắp hết hạn, luồng mật khẩu, thử lại/đóng tác vụ lỗi, xóa/export bản sao, lịch sử/bộ lọc và đối soát chi phí tùy chọn. [Báo cáo 10 điểm và giới hạn thực tế](docs/product-completion.md). Phiên bản mới chưa deploy AWS.
+Nguồn/API **0.4.1** giữ các chức năng đã bổ sung ở 0.4.0: quản trị môi trường/tài khoản/hạn mức, cảnh báo sắp hết hạn, luồng mật khẩu, thử lại/đóng tác vụ lỗi, xóa/export bản sao, lịch sử/bộ lọc và đối soát chi phí tùy chọn. Xem [báo cáo chức năng](docs/product-completion.md), [sáu bản sửa bảo vệ dữ liệu](docs/security-fixes.md) và [kết nối Pages với AWS](docs/github-pages.md).
 
-Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diện tiếng Việt, Cognito, HTTP API, Lambda, DynamoDB, Standard Step Functions, Scheduler, CloudFormation và bản sao theo mẫu. **Mạng AWS đã triển khai; control plane rollback vì AWS yêu cầu xác minh CloudFront. 0/20 vòng AWS thật.** Tất cả mẫu vẫn khóa với người dùng thường.
+Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diện tiếng Việt, Cognito, HTTP API, Lambda, DynamoDB, Standard Step Functions, Scheduler, CloudFormation và bản sao theo mẫu. D01 dùng Pages làm phương án dự phòng đã được người dùng chọn; template CloudFront gốc vẫn được giữ. Gate AWS_VERIFIED của từng mẫu nằm ở backend.
 
-AWS CLI đã dùng phiên root tạm thời được người dùng duyệt; Free Plan còn 183,66 USD credits tại thời điểm đọc. Preflight đạt, `cloudhub-network` CREATE_COMPLETE, `cloudhub-demo` ROLLBACK_COMPLETE do CloudFront HTTP 403/account verification. Còn resource Retain đã kiểm kê; chưa có URL website. Chi tiết và bước tiếp tục trong báo cáo tổng hợp.
+AWS CLI dùng phiên tạm thời được người dùng duyệt, ngân sách 120 USD credits / 0 USD tiền mặt, không nâng Paid Plan. `cloudhub-network` vẫn CREATE_COMPLETE. Các stack thất bại cũ được giữ và dữ liệu retained đã kiểm kê để tái sử dụng; backend mới không phụ thuộc CDN CloudFront của giao diện. T02 vẫn cần quyền tạo CloudFront, T06 cần image ECR được duyệt, T10 cần kiểm plan/quota riêng. SNS đã có đăng ký email được xác nhận và AWS đã nhận yêu cầu cảnh báo thử từ giao diện; chưa xác minh thư đến hộp thư. Cost Explorer chưa bật.
 
 - [Báo cáo tổng hợp](docs/progress.md): phần có mã, kết quả kiểm tra và điểm chặn.
 - [Phiếu tài nguyên và dự toán](docs/deployment-review.md): khoảng 99,438 USD gross cho hai vòng mỗi mẫu; ngân sách 120 USD credits, tiền mặt 0 USD đã được duyệt. Billing thực tế có độ trễ.

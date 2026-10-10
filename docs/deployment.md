@@ -4,7 +4,7 @@ Nguồn 0.4.0 thêm `AlertEmail` (mặc định trống) và `ActualCostsEnabled
 
 Chạy `npm ci` trước `scripts/check.py` để cài dependency kiểm thử DOM. `configure_frontend.py` cần output `Region`; upload cả `portal.js`. Đăng nhập Cognito lại để lấy scope `aws.cognito.signin.user.admin` cho luồng mật khẩu.
 
-**Mạng đã triển khai; control plane ROLLBACK_COMPLETE vì CloudFront cần xác minh account.** Phiên CLI tạm thời và preflight đã dùng được. Xem progress.md trước khi tiếp tục; không tạo stack trùng hoặc xóa resource Retain chưa kiểm kê.
+**Backend dự phòng `cloudhub-pages-live` đã triển khai và cập nhật thành công; giao diện tại https://tuhitomi.github.io/cloudhub/.** Xem [cách kết nối Pages](github-pages.md). Stack CloudFront gốc `cloudhub-demo` vẫn ROLLBACK_COMPLETE; không tạo lại/xóa dữ liệu retained chưa kiểm kê. Các bước CloudFront dưới đây dành cho phương án D01 gốc, không phải điều kiện chặn backend dự phòng.
 
 ## Trước lệnh tạo AWS
 

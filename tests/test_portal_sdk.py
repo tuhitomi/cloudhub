@@ -138,4 +138,50 @@ class DownloadTests(unittest.TestCase):
             stub.add_response('head_object',{'Metadata':{'cloudhub-owner':'bob'}},{'Bucket':'private','Key':self.key,'ExpectedBucketOwner':'123456789012'})
             with self.assertRaises(HubError):download(self.s,'alice',self.oid,self.settings,provider)
 
+    def test_decimal_retention_and_fractional_clock_use_regional_sigv4(self):
+        from decimal import Decimal
+        from urllib.parse import urlsplit,parse_qs
+        self.s.clock=lambda:1000.75
+        rp=self.s.store.get('R#'+self.rid);rp['retain_until']=Decimal(1100);self.s.save(rp)
+        session=boto3.Session(aws_access_key_id='local',aws_secret_access_key='local',region_name='ap-southeast-1')
+        stubs=[]
+        def factory(name,**kwargs):
+            provider=session.client(name,**kwargs);stub=Stubber(provider)
+            stub.add_response('head_object',{'Metadata':{'cloudhub-owner':'alice','cloudhub-environment':self.eid,'cloudhub-recovery':self.rid}},
+                {'Bucket':'private','Key':self.key,'ExpectedBucketOwner':'123456789012'})
+            stub.activate();stubs.append(stub);return provider
+        with patch('boto3.client',side_effect=factory):
+            result=download(self.s,'alice',self.oid,{**self.settings,'region':'ap-southeast-1'})
+        for stub in stubs:stub.assert_no_pending_responses();stub.deactivate()
+        query=parse_qs(urlsplit(result['url']).query)
+        self.assertEqual(query['X-Amz-Algorithm'],['AWS4-HMAC-SHA256'])
+        self.assertEqual(query['X-Amz-Expires'],['99'])
+        self.assertEqual(result['expires_at'],1099)
+        self.assertIn('/ap-southeast-1/s3/aws4_request',query['X-Amz-Credential'][0])
+
+class ShareSigningTests(unittest.TestCase):
+    def test_decimal_deadline_and_actual_sdk_signer(self):
+        from decimal import Decimal
+        from urllib.parse import urlsplit,parse_qs
+        from cloudhub.s3_files import OwnedFiles,bucket_name
+        settings={'account_id':'123456789012','region':'ap-southeast-1'}
+        service=Service(MemoryStore(),clock=lambda:1000.75)
+        env={'pk':'E#env-'+'c'*24,'environment_id':'env-'+'c'*24,'owner_id':'alice','template_id':'T07','status':'READY','deadline':Decimal(1100)}
+        service.store.commit([env],{env['pk']:None})
+        session=boto3.Session(aws_access_key_id='local',aws_secret_access_key='local')
+        with patch('boto3.client',side_effect=lambda name,**kwargs:session.client(name,**kwargs)):
+            files=OwnedFiles(service,settings)
+        bucket=bucket_name(env,settings)
+        with Stubber(files.client) as stub:
+            tags={'cloudhub:environment':env['environment_id'],'cloudhub:owner':'alice','cloudhub:managed':'true'}
+            stub.add_response('get_bucket_tagging',{'TagSet':[{'Key':k,'Value':v} for k,v in tags.items()]},{'Bucket':bucket,'ExpectedBucketOwner':settings['account_id']})
+            stub.add_response('head_object',{'VersionId':'fixed-version'},{'Bucket':bucket,'Key':'cycle.txt','ExpectedBucketOwner':settings['account_id']})
+            result=files.share('alice',env['environment_id'],{'key':'cycle.txt'})
+        parsed=urlsplit(result['url']);query=parse_qs(parsed.query)
+        self.assertEqual(parsed.hostname,bucket+'.s3.ap-southeast-1.amazonaws.com')
+        self.assertEqual(query['X-Amz-Algorithm'],['AWS4-HMAC-SHA256'])
+        self.assertEqual(query['X-Amz-Expires'],['99'])
+        self.assertEqual(query['versionId'],['fixed-version'])
+        self.assertEqual(result['expires_at'],1099)
+
 if __name__=='__main__':unittest.main()

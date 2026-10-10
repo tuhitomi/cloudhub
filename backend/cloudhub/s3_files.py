@@ -88,7 +88,8 @@ class OwnedFiles:
         if client is None:
             import boto3
             from botocore.config import Config
-            client = boto3.client("s3", config=Config(connect_timeout=1, read_timeout=2, retries={"total_max_attempts": 1}))
+            client = boto3.client("s3", region_name=settings.get('region'), config=Config(signature_version='s3v4',
+                s3={'addressing_style':'virtual'}, connect_timeout=1, read_timeout=2, retries={"total_max_attempts": 1}))
         self.client = client
 
     def list(self, owner, eid):
@@ -109,7 +110,7 @@ class OwnedFiles:
         bucket=assert_bucket(self.client,env,self.settings)
         if not bucket:raise HubError('SOURCE_MISSING','Không tìm thấy kho file.',409)
         metadata=self.client.head_object(Bucket=bucket,Key=key,ExpectedBucketOwner=self.settings['account_id'])
-        seconds=min(900,int(env['deadline']-self.service.clock()))
+        seconds=min(900,int(float(env['deadline'])-float(self.service.clock())))
         if seconds<1:raise HubError('INVALID_STATE','Phiên đã hết hạn.',409)
         # Sign a fixed object version, so a later write cannot change shared content.
         params={'Bucket':bucket,'Key':key,

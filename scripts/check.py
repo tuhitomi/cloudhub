@@ -38,6 +38,8 @@ def main():
         from cloudhub.s3_template import s3_template
         settings={'availability_zone':'us-east-1a','ami_id':'ami-0123456789abcdef0','vpc_id':'vpc-0123456789abcdef0','public_subnet_id':'subnet-0123456789abcdef0','instance_profile':'shared-ssm','ssh_cidr':'192.0.2.1/32'}
         sources=[('control_plane',paths[0].read_text()),('optional_shared_network',(ROOT/'infra/network.json').read_text())]
+        from generate_infra import build_template
+        sources.append(('control_plane_external_frontend', json.dumps(build_template('https://example.github.io/cloudhub/'))))
         for tid in ['T01','T05']:
             for snapshot in [None,'snap-0123456789abcdef0']:
                 source=json.dumps(linux_template({'environment_id':'env-validation','owner_id':'validation','template_id':tid},settings,snapshot))

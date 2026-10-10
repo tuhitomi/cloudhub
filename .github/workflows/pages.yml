@@ -1,4 +1,4 @@
-name: Publish CloudHub UI preview
+name: Publish CloudHub website
 
 on:
   push:
@@ -7,6 +7,9 @@ on:
       - 'frontend/**'
       - 'backend/cloudhub/catalog.py'
       - 'scripts/build_pages_preview.py'
+      - 'scripts/build_pages_live.py'
+      - 'scripts/generate_infra.py'
+      - 'config/pages-public.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -24,8 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - name: Build only the static preview
-        run: python3 scripts/build_pages_preview.py --out site
+      - name: Build public browser assets
+        run: |
+          if [ -f config/pages-public.json ]; then
+            python3 scripts/build_pages_live.py --config config/pages-public.json --out site
+          else
+            python3 scripts/build_pages_preview.py --out site
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -39,6 +47,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy preview
+      - name: Deploy website
         id: deployment
         uses: actions/deploy-pages@v4

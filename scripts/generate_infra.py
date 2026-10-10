@@ -1,6 +1,8 @@
 """Generate JSON SAM (JSON avoids custom YAML parsing locally). No AWS calls."""
 import json
+import argparse
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 def ref(x): return {"Ref": x}
@@ -16,7 +18,19 @@ def role(service, statements, managed=None):
     if managed: p["ManagedPolicyArns"] = managed
     return {"Type": "AWS::IAM::Role", "Properties": p}
 
-def main():
+def frontend_urls(value):
+    """Keep the callback path; CORS must contain only the HTTPS origin."""
+    parsed = urlsplit(value)
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.port not in (None, 443)
+            or any(c.isspace() for c in value) or '${' in value):
+        raise ValueError('Frontend URL must be HTTPS without credentials, query, fragment or nonstandard port')
+    origin = 'https://' + parsed.netloc.lower()
+    return origin + parsed.path.rstrip('/') + '/', origin
+
+
+def build_template(frontend_url=None):
+    callback, origin = frontend_urls(frontend_url) if frontend_url else (None, None)
     r = {}
     params = {
         "VpcId": {"Type": "AWS::EC2::VPC::Id"}, "PublicSubnetId": {"Type": "AWS::EC2::Subnet::Id"},
@@ -130,6 +144,8 @@ def main():
         policy("cloudfront:GetOriginAccessControl", sub("arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*"))])
     from infra_extensions import extend
     extend(params,r,settings,cf_statements,worker_policies)
+    if origin:
+        settings['frontend_origin'] = origin
     for name, suffix, handler, statements in [
         ("ApiFunction", "api", "cloudhub.api.handler", [data_policy, start_policy,
             policy(["s3:GetBucketTagging", "s3:ListBucket"], env_bucket),
@@ -183,8 +199,30 @@ def main():
     from portal_infra import extend as extend_portal
     conditions=extend_portal(params,r,common,policy,ref,sub,att)
     outputs['Region']={'Value':ref('AWS::Region')}
+    if callback:
+        # External hosting needs no CloudFront resource in the control plane.
+        for name in ['FrontendBucket', 'OriginAccess', 'FrontendDistribution', 'FrontendBucketPolicy']:
+            del r[name]
+        r['UserClient']['Properties'].update(CallbackURLs=[callback], LogoutURLs=[callback])
+        r['HttpApi']['Properties']['CorsConfiguration']['AllowOrigins'] = [origin]
+        outputs['FrontendUrl'] = {'Value': callback}
+        del outputs['FrontendBucket']
+        del outputs['DistributionId']
     template = {"AWSTemplateFormatVersion": "2010-09-09", "Transform": "AWS::Serverless-2016-10-31", "Description": "CloudHub D01-D13 T01-T10 source; AWS validation required", "Parameters": params, "Conditions":conditions,"Resources": r, "Outputs": outputs}
-    (ROOT / "infra/control-plane.json").write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("Generated infra/control-plane.json")
+    return template
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--frontend-url', help='External HTTPS frontend, including any project path. Omitting this keeps CloudFront hosting.')
+    parser.add_argument('--out', type=Path, help='Dedicated template output; required with external hosting.')
+    args = parser.parse_args()
+    if args.frontend_url and not args.out:
+        parser.error('--out is required for external hosting; preserve the default template')
+    target = args.out or ROOT / 'infra/control-plane.json'
+    template = build_template(args.frontend_url)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding='utf-8')
+    print('Generated ' + str(target))
 
 if __name__ == "__main__": main()

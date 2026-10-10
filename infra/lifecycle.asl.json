@@ -1,0 +1,27 @@
+{
+  "Comment": "Bounded poll transitions; errors preserve source data",
+  "StartAt": "Tick",
+  "TimeoutSeconds": 7200,
+  "States": {
+    "Tick": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {"FunctionName": "${WorkerArn}", "Payload.$": "$"},
+      "OutputPath": "$.Payload",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.failure", "Next": "MarkFailure"}],
+      "Next": "Done"
+    },
+    "Done": {"Type": "Choice", "Choices": [{"Variable": "$.done", "BooleanEquals": true, "Next": "CheckFailure"}], "Default": "Wait"},
+    "Wait": {"Type": "Wait", "Seconds": 30, "Next": "Tick"},
+    "CheckFailure": {"Type": "Choice", "Choices": [{"Variable": "$.failed", "BooleanEquals": true, "Next": "Failed"}], "Default": "Succeeded"},
+    "MarkFailure": {
+      "Type": "Task", "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {"FunctionName": "${WorkerArn}", "Payload.$": "$"},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3}],
+      "Next": "Failed"
+    },
+    "Failed": {"Type": "Fail", "Error": "CloudHubOperationFailed"},
+    "Succeeded": {"Type": "Succeed"}
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "recorded_at": "2026-10-09T15:24:58.064432+00:00",
+  "mode": "REVIEW_REPRODUCTIONS_NOT_ACCEPTANCE_TESTS",
+  "aws_mutations": 0,
+  "findings": [
+    {
+      "finding": "R01_FINAL_BACKUP_DELETABLE_DURING_RETIREMENT",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "backup_state": "DELETED",
+        "source_delete_called": true,
+        "retirement_phase": "AUDIT"
+      }
+    },
+    {
+      "finding": "R01B_DELETE_RETRY_WITHOUT_FINAL_BACKUP",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "backup_state": "DELETED",
+        "source_delete_called": true
+      }
+    },
+    {
+      "finding": "R02_EBS_EXPIRY_WITHOUT_AWS_RECONCILIATION",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "returned_deleted": true,
+        "aws_calls": 0
+      }
+    },
+    {
+      "finding": "R03_STALE_ADMIN_CAN_CREATE_UNVERIFIED_TEMPLATE",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "http_status": 202,
+        "live_admin_checks": 0
+      }
+    },
+    {
+      "finding": "R04_DISABLED_ACCOUNT_STILL_READS_T09",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "http_status": 200,
+        "queried_management_keys": [
+          "E#env-review"
+        ]
+      }
+    },
+    {
+      "finding": "R05_RESIDUAL_HAS_NO_ALERT_EVENT",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "environment_status": "RESIDUAL",
+        "operation_status": "SUCCEEDED",
+        "worker_failed": false,
+        "emitted_log": ""
+      }
+    },
+    {
+      "finding": "R06_SHARED_SSM_ROLE_HAS_NO_PARAMETER_BOUNDARY",
+      "confirmed_issue": true,
+      "mode": "LOCAL_MOCK_OR_STATIC",
+      "observed": {
+        "managed_policy": "AmazonSSMManagedInstanceCore",
+        "boundary_present": false,
+        "inline_deny_present": false,
+        "provider_policy_verified_from_official_docs": true
+      }
+    }
+  ]
+}

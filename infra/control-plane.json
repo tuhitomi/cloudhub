@@ -1,0 +1,3607 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Transform": "AWS::Serverless-2016-10-31",
+  "Description": "CloudHub D01-D13 T01-T10 source; AWS validation required",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "PublicSubnetId": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "AvailabilityZone": {
+      "Type": "AWS::EC2::AvailabilityZone::Name"
+    },
+    "AmiId": {
+      "Type": "AWS::EC2::Image::Id"
+    },
+    "SshCidr": {
+      "Type": "String",
+      "AllowedPattern": "([0-9]{1,3}\\.){3}[0-9]{1,3}/(2[4-9]|3[0-2])",
+      "Description": "Approved IPv4 network /24 or narrower for SSH, configured by operator"
+    },
+    "PricesJson": {
+      "Type": "String",
+      "Default": "{\"approved\":false}"
+    },
+    "BudgetMilliusd": {
+      "Type": "Number",
+      "Default": 0,
+      "MinValue": 0
+    },
+    "VerifiedTemplates": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "(T0[1-9]|T10)?(,(T0[1-9]|T10))*"
+    },
+    "ValidationTemplates": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "(T0[1-9]|T10)?(,(T0[1-9]|T10))*"
+    },
+    "UserLimit": {
+      "Type": "Number",
+      "Default": 2,
+      "MinValue": 1,
+      "MaxValue": 4
+    },
+    "TotalLimit": {
+      "Type": "Number",
+      "Default": 4,
+      "MinValue": 1,
+      "MaxValue": 8
+    },
+    "PublicSubnet2Id": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "DbSubnet1Id": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "DbSubnet2Id": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "PostgresVersion": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]+\\.[0-9]+",
+      "Description": "Approved RDS PostgreSQL version in the chosen region"
+    },
+    "ApprovedImage": {
+      "Type": "String",
+      "Default": "",
+      "Description": "Reviewed own-account ECR digest for T06; required when enabling T06"
+    },
+    "AlertEmail": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|[^\\s@]+@[^\\s@]+\\.[^\\s@]+",
+      "Description": "Approved operator email. Recipient must confirm SNS subscription."
+    },
+    "ActualCostsEnabled": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Enable manual Cost Explorer queries after operator reviews API charges and activates cloudhub:environment cost allocation tag."
+    }
+  },
+  "Conditions": {
+    "HasAlertEmail": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "AlertEmail"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "CostsEnabled": {
+      "Fn::Equals": [
+        {
+          "Ref": "ActualCostsEnabled"
+        },
+        "true"
+      ]
+    }
+  },
+  "Resources": {
+    "Table": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "owner_id",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "owner_sort",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "by_owner",
+            "KeySchema": [
+              {
+                "AttributeName": "owner_id",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "owner_sort",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          }
+        ],
+        "PointInTimeRecoverySpecification": {
+          "PointInTimeRecoveryEnabled": true
+        },
+        "SSESpecification": {
+          "SSEEnabled": true
+        }
+      }
+    },
+    "FrontendBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        }
+      }
+    },
+    "OriginAccess": {
+      "Type": "AWS::CloudFront::OriginAccessControl",
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": {
+            "Fn::Sub": "${AWS::StackName}-oac"
+          },
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4"
+        }
+      }
+    },
+    "FrontendDistribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "DefaultRootObject": "index.html",
+          "HttpVersion": "http2",
+          "PriceClass": "PriceClass_100",
+          "Origins": [
+            {
+              "Id": "private-s3",
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "FrontendBucket",
+                  "RegionalDomainName"
+                ]
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": ""
+              },
+              "OriginAccessControlId": {
+                "Ref": "OriginAccess"
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "private-s3",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "Compress": true,
+            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "ResponseHeadersPolicyId": "67f7725c-6f97-4210-82d7-5512b31e9d03"
+          },
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+          }
+        }
+      }
+    },
+    "FrontendBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "FrontendBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com"
+              },
+              "Action": "s3:GetObject",
+              "Resource": {
+                "Fn::Sub": "${FrontendBucket.Arn}/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "FrontendBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${FrontendBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "UserPool": {
+      "Type": "AWS::Cognito::UserPool",
+      "Properties": {
+        "UsernameAttributes": [
+          "email"
+        ],
+        "AutoVerifiedAttributes": [
+          "email"
+        ],
+        "AdminCreateUserConfig": {
+          "AllowAdminCreateUserOnly": true
+        },
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 12,
+            "RequireLowercase": true,
+            "RequireUppercase": true,
+            "RequireNumbers": true,
+            "RequireSymbols": true
+          }
+        },
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Name": "verified_email",
+              "Priority": 1
+            }
+          ]
+        }
+      }
+    },
+    "AdminGroup": {
+      "Type": "AWS::Cognito::UserPoolGroup",
+      "Properties": {
+        "GroupName": "admin",
+        "UserPoolId": {
+          "Ref": "UserPool"
+        }
+      }
+    },
+    "ResourceServer": {
+      "Type": "AWS::Cognito::UserPoolResourceServer",
+      "Properties": {
+        "Identifier": "cloudhub",
+        "Name": "CloudHub",
+        "UserPoolId": {
+          "Ref": "UserPool"
+        },
+        "Scopes": [
+          {
+            "ScopeName": "use",
+            "ScopeDescription": "CloudHub operations"
+          }
+        ]
+      }
+    },
+    "UserClient": {
+      "Type": "AWS::Cognito::UserPoolClient",
+      "DependsOn": "ResourceServer",
+      "Properties": {
+        "UserPoolId": {
+          "Ref": "UserPool"
+        },
+        "GenerateSecret": false,
+        "AllowedOAuthFlowsUserPoolClient": true,
+        "AllowedOAuthFlows": [
+          "code"
+        ],
+        "AllowedOAuthScopes": [
+          "openid",
+          "email",
+          "cloudhub/use",
+          "aws.cognito.signin.user.admin"
+        ],
+        "SupportedIdentityProviders": [
+          "COGNITO"
+        ],
+        "CallbackURLs": [
+          {
+            "Fn::Sub": "https://${FrontendDistribution.DomainName}/"
+          }
+        ],
+        "LogoutURLs": [
+          {
+            "Fn::Sub": "https://${FrontendDistribution.DomainName}/"
+          }
+        ],
+        "PreventUserExistenceErrors": "ENABLED",
+        "EnableTokenRevocation": true,
+        "AccessTokenValidity": 60,
+        "TokenValidityUnits": {
+          "AccessToken": "minutes",
+          "RefreshToken": "days"
+        },
+        "RefreshTokenValidity": 1
+      }
+    },
+    "UserDomain": {
+      "Type": "AWS::Cognito::UserPoolDomain",
+      "Properties": {
+        "Domain": {
+          "Fn::Sub": "${AWS::StackName}-${AWS::AccountId}"
+        },
+        "UserPoolId": {
+          "Ref": "UserPool"
+        }
+      }
+    },
+    "HttpApi": {
+      "Type": "AWS::Serverless::HttpApi",
+      "Properties": {
+        "StageName": "$default",
+        "CorsConfiguration": {
+          "AllowOrigins": [
+            {
+              "Fn::Sub": "https://${FrontendDistribution.DomainName}"
+            }
+          ],
+          "AllowHeaders": [
+            "Authorization",
+            "Content-Type",
+            "Idempotency-Key"
+          ],
+          "AllowMethods": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ],
+          "MaxAge": 300
+        },
+        "Auth": {
+          "DefaultAuthorizer": "CognitoJwt",
+          "Authorizers": {
+            "CognitoJwt": {
+              "IdentitySource": "$request.header.Authorization",
+              "JwtConfiguration": {
+                "issuer": {
+                  "Fn::Sub": "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+                },
+                "audience": [
+                  {
+                    "Ref": "UserClient"
+                  }
+                ]
+              },
+              "AuthorizationScopes": [
+                "cloudhub/use"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "SessionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+          }
+        ]
+      }
+    },
+    "SessionProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "SessionRole"
+          }
+        ]
+      }
+    },
+    "EnvironmentCfRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudformation.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      }
+    },
+    "BackupRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "backup.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+          }
+        ]
+      }
+    },
+    "BackupVault": {
+      "Type": "AWS::Backup::BackupVault",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BackupVaultName": {
+          "Fn::Sub": "${AWS::StackName}-data"
+        }
+      }
+    },
+    "S3BackupBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        }
+      }
+    },
+    "S3BackupBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "S3BackupBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "S3BackupBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${S3BackupBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ScheduleGroup": {
+      "Type": "AWS::Scheduler::ScheduleGroup",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-sessions"
+        }
+      }
+    },
+    "Dlq": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "SqsManagedSseEnabled": true
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "cloudhub",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "lambda:InvokeFunction",
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-expiry"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sqs:SendMessage",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Dlq",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "RatesParameter": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "/cloudhub/${AWS::StackName}/prices"
+        },
+        "Type": "String",
+        "Tier": "Standard",
+        "Value": {
+          "Ref": "PricesJson"
+        }
+      }
+    },
+    "EnvironmentBoundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:UpdateInstanceInformation",
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel",
+                "ecr:GetAuthorizationToken"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*cloudhub-env-*:*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "dynamodb:Scan",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/cloudhub-env-*-data"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "dynamodb:GetItem",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "Table",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    {
+                      "Fn::Sub": "E#${!aws:PrincipalTag/cloudhub:environment}"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "secretsmanager:GetSecretValue",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "secretsmanager:ResourceTag/cloudhub:environment": {
+                    "Fn::Sub": "${!aws:PrincipalTag/cloudhub:environment}"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "s3:ListBucket",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "s3:GetObject",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "BackupRestoreRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "backup.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+          }
+        ]
+      }
+    },
+    "EnvironmentPolicy0": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "EnvironmentCfRole"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:Describe*"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:RunInstances"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}::image/${AmiId}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnetId}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:key-pair/*"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:CreateVolume",
+                "ec2:CreateSecurityGroup",
+                "ec2:CreateKeyPair",
+                "ec2:CreateTags",
+                "ec2:AttachVolume",
+                "ec2:AuthorizeSecurityGroupIngress",
+                "ec2:AuthorizeSecurityGroupEgress",
+                "ec2:RevokeSecurityGroupEgress"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:TerminateInstances",
+                "ec2:DeleteVolume",
+                "ec2:DeleteSecurityGroup",
+                "ec2:DeleteKeyPair",
+                "ec2:DetachVolume"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  },
+                  "ec2:ResourceTag/cloudhub:managed": "true"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:PutParameter",
+                "ssm:DeleteParameter"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ec2/keypair/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "iam:PassRole",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SessionRole",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ec2.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:GetBucketLocation",
+                "s3:GetBucketTagging",
+                "s3:PutBucketTagging",
+                "s3:GetBucketVersioning",
+                "s3:PutBucketVersioning",
+                "s3:GetBucketPublicAccessBlock",
+                "s3:PutBucketPublicAccessBlock",
+                "s3:GetEncryptionConfiguration",
+                "s3:PutEncryptionConfiguration",
+                "s3:GetBucketOwnershipControls",
+                "s3:PutBucketOwnershipControls",
+                "s3:GetBucketPolicy",
+                "s3:PutBucketPolicy",
+                "s3:DeleteBucketPolicy",
+                "s3:ListBucket"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudfront:CreateDistribution",
+                "cloudfront:CreateDistributionWithTags",
+                "cloudfront:CreateOriginAccessControl"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudfront:GetDistribution",
+                "cloudfront:GetDistributionConfig",
+                "cloudfront:UpdateDistribution",
+                "cloudfront:DeleteDistribution",
+                "cloudfront:TagResource",
+                "cloudfront:UntagResource",
+                "cloudfront:ListTagsForResource"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudfront:GetOriginAccessControl",
+                "cloudfront:GetOriginAccessControlConfig",
+                "cloudfront:UpdateOriginAccessControl",
+                "cloudfront:DeleteOriginAccessControl"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:RunInstances"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnet2Id}"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:CreateLaunchTemplate",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:GetLaunchTemplateData"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "iam:CreateRole",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+              },
+              "Condition": {
+                "ArnEquals": {
+                  "iam:PermissionsBoundary": {
+                    "Ref": "EnvironmentBoundary"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:PutRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:TagRole",
+                "iam:UntagRole"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:GetInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/cloudhub-env-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "iam:PassRole",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": [
+                    "ec2.amazonaws.com",
+                    "lambda.amazonaws.com",
+                    "ecs-tasks.amazonaws.com",
+                    "redshift.amazonaws.com"
+                  ]
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "iam:CreateServiceLinkedRole",
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "iam:AWSServiceName": [
+                    "autoscaling.amazonaws.com",
+                    "elasticloadbalancing.amazonaws.com",
+                    "ecs.amazonaws.com",
+                    "rds.amazonaws.com",
+                    "redshift-serverless.amazonaws.com"
+                  ]
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "rds:CreateDBInstance",
+                "rds:RestoreDBInstanceFromDBSnapshot",
+                "rds:DeleteDBInstance",
+                "rds:ModifyDBInstance",
+                "rds:AddTagsToResource",
+                "rds:ListTagsForResource"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:cloudhub-env-*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:cloudhub-rp-*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:subgrp:cloudhub-env-*"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "rds:CreateDBSubnetGroup",
+                "rds:DeleteDBSubnetGroup",
+                "rds:ModifyDBSubnetGroup"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:subgrp:cloudhub-env-*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "EnvironmentPolicy1": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "EnvironmentCfRole"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "rds:DescribeDBInstances",
+                "rds:DescribeDBSubnetGroups",
+                "rds:DescribeDBSnapshots"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:CreateSecret",
+                "secretsmanager:TagResource",
+                "secretsmanager:DescribeSecret"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "autoscaling:CreateAutoScalingGroup",
+                "autoscaling:UpdateAutoScalingGroup",
+                "autoscaling:DeleteAutoScalingGroup",
+                "autoscaling:PutScalingPolicy",
+                "autoscaling:DeletePolicy",
+                "autoscaling:CreateOrUpdateTags"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/cloudhub-env-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribePolicies",
+                "autoscaling:DescribeScalingActivities"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "elasticloadbalancing:CreateLoadBalancer",
+                "elasticloadbalancing:CreateTargetGroup",
+                "elasticloadbalancing:CreateListener",
+                "elasticloadbalancing:AddTags"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "elasticloadbalancing:DeleteLoadBalancer",
+                "elasticloadbalancing:DeleteTargetGroup",
+                "elasticloadbalancing:DeleteListener",
+                "elasticloadbalancing:ModifyTargetGroup",
+                "elasticloadbalancing:ModifyTargetGroupAttributes",
+                "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                "elasticloadbalancing:ModifyListener",
+                "elasticloadbalancing:RegisterTargets",
+                "elasticloadbalancing:DeregisterTargets"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/app/ch-*/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:targetgroup/ch-*/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:listener/app/ch-*/*/*"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": "elasticloadbalancing:Describe*",
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:TargetTracking-cloudhub-env-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "elasticfilesystem:CreateFileSystem",
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:DescribeMountTargetSecurityGroups",
+                "elasticfilesystem:DescribeBackupPolicy",
+                "elasticfilesystem:TagResource",
+                "elasticfilesystem:ListTagsForResource",
+                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:DeleteMountTarget",
+                "elasticfilesystem:DeleteFileSystem",
+                "elasticfilesystem:PutBackupPolicy"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:CreateTable",
+                "dynamodb:DescribeTable",
+                "dynamodb:DeleteTable",
+                "dynamodb:TagResource",
+                "dynamodb:ListTagsOfResource"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/cloudhub-env-*-data"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:CreateFunction",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:DeleteFunction",
+                "lambda:AddPermission",
+                "lambda:RemovePermission",
+                "lambda:GetPolicy",
+                "lambda:TagResource",
+                "lambda:UntagResource",
+                "lambda:PutFunctionConcurrency",
+                "lambda:DeleteFunctionConcurrency"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:cloudhub-env-*-data"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "apigateway:GET",
+                "apigateway:POST",
+                "apigateway:DELETE",
+                "apigateway:PATCH"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:DescribeLogGroups",
+                "logs:DeleteLogGroup",
+                "logs:PutRetentionPolicy",
+                "logs:TagResource",
+                "logs:ListTagsForResource"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*cloudhub-env-*:*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:CreateCluster",
+                "ecs:DeleteCluster",
+                "ecs:CreateService",
+                "ecs:DeleteService",
+                "ecs:UpdateService",
+                "ecs:DescribeClusters",
+                "ecs:DescribeServices",
+                "ecs:RegisterTaskDefinition",
+                "ecs:DeregisterTaskDefinition",
+                "ecs:DescribeTaskDefinition",
+                "ecs:TagResource",
+                "ecs:UntagResource",
+                "ecs:ListTagsForResource"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "redshift-serverless:CreateNamespace",
+                "redshift-serverless:DeleteNamespace",
+                "redshift-serverless:UpdateNamespace",
+                "redshift-serverless:GetNamespace",
+                "redshift-serverless:CreateWorkgroup",
+                "redshift-serverless:DeleteWorkgroup",
+                "redshift-serverless:UpdateWorkgroup",
+                "redshift-serverless:GetWorkgroup",
+                "redshift-serverless:RestoreFromSnapshot",
+                "redshift-serverless:GetSnapshot",
+                "redshift-serverless:TagResource",
+                "redshift-serverless:ListTagsForResource"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ApiFunction": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-api"
+        },
+        "CodeUri": "../backend/",
+        "Handler": "cloudhub.api.handler",
+        "Runtime": "python3.13",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Timeout": 5,
+        "MemorySize": 256,
+        "Environment": {
+          "Variables": {
+            "TABLE_NAME": {
+              "Ref": "Table"
+            },
+            "PRICES_PARAMETER": {
+              "Ref": "RatesParameter"
+            },
+            "BUDGET_MILLIUSD": {
+              "Ref": "BudgetMilliusd"
+            },
+            "VERIFIED_TEMPLATES": {
+              "Ref": "VerifiedTemplates"
+            },
+            "VALIDATION_TEMPLATES": {
+              "Ref": "ValidationTemplates"
+            },
+            "USER_LIMIT": {
+              "Ref": "UserLimit"
+            },
+            "TOTAL_LIMIT": {
+              "Ref": "TotalLimit"
+            },
+            "STATE_MACHINE_ARN": {
+              "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+            },
+            "DRIVER_SETTINGS": {
+              "Fn::Sub": "{\"vpc_id\":\"${VpcId}\",\"public_subnet_id\":\"${PublicSubnetId}\",\"availability_zone\":\"${AvailabilityZone}\",\"ami_id\":\"${AmiId}\",\"ssh_cidr\":\"${SshCidr}\",\"instance_profile\":\"${SessionProfile}\",\"cf_role_arn\":\"${EnvironmentCfRole.Arn}\",\"schedule_group\":\"${ScheduleGroup}\",\"expiry_arn\":\"arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-expiry\",\"scheduler_role\":\"${SchedulerRole.Arn}\",\"dlq_arn\":\"${Dlq.Arn}\",\"backup_vault\":\"${BackupVault}\",\"backup_role\":\"${BackupRole.Arn}\",\"s3_backup_bucket\":\"${S3BackupBucket}\",\"account_id\":\"${AWS::AccountId}\",\"region\":\"${AWS::Region}\",\"public_subnet_ids\":[\"${PublicSubnetId}\",\"${PublicSubnet2Id}\"],\"db_subnet_ids\":[\"${DbSubnet1Id}\",\"${DbSubnet2Id}\"],\"postgres_version\":\"${PostgresVersion}\",\"approved_image\":\"${ApprovedImage}\",\"permissions_boundary\":\"${EnvironmentBoundary}\",\"management_table\":\"${Table}\",\"management_table_arn\":\"${Table.Arn}\",\"cognito_client_id\":\"${UserClient}\",\"cognito_issuer\":\"https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}\",\"backup_restore_role\":\"${BackupRestoreRole.Arn}\",\"frontend_origin\":\"https://${FrontendDistribution.DomainName}\"}"
+            },
+            "USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "ALERT_TOPIC_ARN": {
+              "Ref": "AlertTopic"
+            },
+            "ALERT_EMAIL": {
+              "Ref": "AlertEmail"
+            },
+            "ACTUAL_COSTS_ENABLED": {
+              "Ref": "ActualCostsEnabled"
+            }
+          }
+        },
+        "Policies": [
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:TransactWriteItems",
+                  "dynamodb:Query",
+                  "dynamodb:Scan"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": [
+                      "Table",
+                      "Arn"
+                    ]
+                  },
+                  {
+                    "Fn::Sub": "${Table.Arn}/index/*"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": "states:StartExecution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetBucketTagging",
+                  "s3:ListBucket"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "s3:GetObjectVersion",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ec2:DescribeKeyPairs",
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ec2/keypair/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudhub/${AWS::StackName}/prices"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "cognito-idp:AdminGetUser",
+                  "cognito-idp:AdminListGroupsForUser",
+                  "cognito-idp:ListUsers",
+                  "cognito-idp:AdminCreateUser",
+                  "cognito-idp:AdminDisableUser",
+                  "cognito-idp:AdminEnableUser"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sns:ListSubscriptionsByTopic",
+                  "sns:Publish"
+                ],
+                "Resource": {
+                  "Ref": "AlertTopic"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "states:DescribeExecution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-lifecycle:*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject"
+                ],
+                "Resource": {
+                  "Fn::Sub": "${S3BackupBucket.Arn}/recovery/rp-*/exports/*"
+                }
+              }
+            ]
+          }
+        ],
+        "Events": {
+          "Route0": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/templates"
+            }
+          },
+          "Route1": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/estimates"
+            }
+          },
+          "Route2": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/environments"
+            }
+          },
+          "Route3": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments"
+            }
+          },
+          "Route4": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/environments/{environment_id}"
+            }
+          },
+          "Route5": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/{action}"
+            }
+          },
+          "Route6": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/environments/{environment_id}/ssh-key"
+            }
+          },
+          "Route7": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/environments/{environment_id}/files"
+            }
+          },
+          "Route8": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/files"
+            }
+          },
+          "Route9": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/operations/{operation_id}"
+            }
+          },
+          "Route10": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/recovery-points"
+            }
+          },
+          "Route11": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/recovery-points/{recovery_point}"
+            }
+          },
+          "Route12": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/admin/attention"
+            }
+          },
+          "PortalRoute0": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/limits"
+            }
+          },
+          "PortalRoute1": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/notifications"
+            }
+          },
+          "PortalRoute2": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/operations"
+            }
+          },
+          "PortalRoute3": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/operations/{operation_id}/{control}"
+            }
+          },
+          "PortalRoute4": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/operations/{operation_id}/download"
+            }
+          },
+          "PortalRoute5": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/recovery-points/{recovery_point}/{control}"
+            }
+          },
+          "PortalRoute6": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/environments/{environment_id}/cost"
+            }
+          },
+          "PortalRoute7": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/cost"
+            }
+          },
+          "PortalRoute8": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/admin/environments"
+            }
+          },
+          "PortalRoute9": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/admin/operations/{operation_id}"
+            }
+          },
+          "PortalRoute10": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/admin/users"
+            }
+          },
+          "PortalRoute11": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/admin/users"
+            }
+          },
+          "PortalRoute12": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/admin/users/{owner_id}/{control}"
+            }
+          },
+          "PortalRoute13": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/admin/environments/{environment_id}/retire"
+            }
+          },
+          "PortalRoute14": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/admin/notifications"
+            }
+          },
+          "PortalRoute15": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/admin/notifications/test"
+            }
+          }
+        }
+      }
+    },
+    "ApiFunctionLog": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/${AWS::StackName}-api"
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "WorkerFunction": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-worker"
+        },
+        "CodeUri": "../backend/",
+        "Handler": "cloudhub.worker.handler",
+        "Runtime": "python3.13",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Timeout": 60,
+        "MemorySize": 256,
+        "Environment": {
+          "Variables": {
+            "TABLE_NAME": {
+              "Ref": "Table"
+            },
+            "PRICES_PARAMETER": {
+              "Ref": "RatesParameter"
+            },
+            "BUDGET_MILLIUSD": {
+              "Ref": "BudgetMilliusd"
+            },
+            "VERIFIED_TEMPLATES": {
+              "Ref": "VerifiedTemplates"
+            },
+            "VALIDATION_TEMPLATES": {
+              "Ref": "ValidationTemplates"
+            },
+            "USER_LIMIT": {
+              "Ref": "UserLimit"
+            },
+            "TOTAL_LIMIT": {
+              "Ref": "TotalLimit"
+            },
+            "STATE_MACHINE_ARN": {
+              "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+            },
+            "DRIVER_SETTINGS": {
+              "Fn::Sub": "{\"vpc_id\":\"${VpcId}\",\"public_subnet_id\":\"${PublicSubnetId}\",\"availability_zone\":\"${AvailabilityZone}\",\"ami_id\":\"${AmiId}\",\"ssh_cidr\":\"${SshCidr}\",\"instance_profile\":\"${SessionProfile}\",\"cf_role_arn\":\"${EnvironmentCfRole.Arn}\",\"schedule_group\":\"${ScheduleGroup}\",\"expiry_arn\":\"arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-expiry\",\"scheduler_role\":\"${SchedulerRole.Arn}\",\"dlq_arn\":\"${Dlq.Arn}\",\"backup_vault\":\"${BackupVault}\",\"backup_role\":\"${BackupRole.Arn}\",\"s3_backup_bucket\":\"${S3BackupBucket}\",\"account_id\":\"${AWS::AccountId}\",\"region\":\"${AWS::Region}\",\"public_subnet_ids\":[\"${PublicSubnetId}\",\"${PublicSubnet2Id}\"],\"db_subnet_ids\":[\"${DbSubnet1Id}\",\"${DbSubnet2Id}\"],\"postgres_version\":\"${PostgresVersion}\",\"approved_image\":\"${ApprovedImage}\",\"permissions_boundary\":\"${EnvironmentBoundary}\",\"management_table\":\"${Table}\",\"management_table_arn\":\"${Table.Arn}\",\"cognito_client_id\":\"${UserClient}\",\"cognito_issuer\":\"https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}\",\"backup_restore_role\":\"${BackupRestoreRole.Arn}\",\"frontend_origin\":\"https://${FrontendDistribution.DomainName}\"}"
+            },
+            "USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "ALERT_TOPIC_ARN": {
+              "Ref": "AlertTopic"
+            },
+            "ALERT_EMAIL": {
+              "Ref": "AlertEmail"
+            },
+            "ACTUAL_COSTS_ENABLED": {
+              "Ref": "ActualCostsEnabled"
+            }
+          }
+        },
+        "Policies": [
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:TransactWriteItems",
+                  "dynamodb:Query",
+                  "dynamodb:Scan"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": [
+                      "Table",
+                      "Arn"
+                    ]
+                  },
+                  {
+                    "Fn::Sub": "${Table.Arn}/index/*"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "cloudformation:CreateStack",
+                  "cloudformation:DeleteStack",
+                  "cloudformation:DescribeStacks",
+                  "cloudformation:ListStackResources"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/cloudhub-env-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:Describe*"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:StopInstances",
+                  "ec2:StartInstances"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    },
+                    "ec2:ResourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ssm:DescribeInstanceInformation",
+                  "ssm:GetCommandInvocation"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ec2/keypair/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:SendCommand",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:SendCommand",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "ssm:resourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "scheduler:CreateSchedule"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "backup:StartBackupJob",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "BackupVault",
+                    "Arn"
+                  ]
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "backup:DescribeBackupJob",
+                  "backup:DeleteRecoveryPoint"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "EnvironmentCfRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "cloudformation.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "SchedulerRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "scheduler.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "BackupRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "backup.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetBucketTagging",
+                  "s3:ListBucket",
+                  "s3:ListBucketVersions",
+                  "s3:GetBucketPolicy"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:GetObjectVersion",
+                  "s3:PutObject",
+                  "s3:DeleteObject",
+                  "s3:DeleteObjectVersion"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "s3:ListBucket",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "S3BackupBucket",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringLike": {
+                    "s3:prefix": "recovery/rp-*/*"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "s3:DeleteObject"
+                ],
+                "Resource": {
+                  "Fn::Sub": "${S3BackupBucket.Arn}/recovery/rp-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudfront:GetDistribution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudfront:GetOriginAccessControl",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "rds:DescribeDBInstances",
+                  "rds:DescribeDBSnapshots",
+                  "rds:DescribeDBSubnetGroups"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "rds:CreateDBSnapshot",
+                  "rds:DeleteDBSnapshot",
+                  "rds:AddTagsToResource",
+                  "rds:ListTagsForResource"
+                ],
+                "Resource": [
+                  {
+                    "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:cloudhub-env-*"
+                  },
+                  {
+                    "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:cloudhub-rp-*"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "autoscaling:DescribeAutoScalingGroups",
+                  "autoscaling:DescribePolicies",
+                  "elasticloadbalancing:Describe*"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudwatch:DescribeAlarms",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:TargetTracking-cloudhub-env-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "iam:GetRole"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:GetInstanceProfile",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/cloudhub-env-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "secretsmanager:DescribeSecret",
+                  "secretsmanager:TagResource"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "secretsmanager:GetSecretValue",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "secretsmanager:ResourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "elasticfilesystem:DescribeFileSystems",
+                  "elasticfilesystem:DescribeMountTargets",
+                  "elasticfilesystem:ListTagsForResource"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "backup:StartRestoreJob",
+                  "backup:DescribeRestoreJob",
+                  "backup:ListRecoveryPointsByBackupVault",
+                  "backup:ListTags"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "BackupRestoreRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "backup.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:DescribeTable",
+                  "dynamodb:ListTagsOfResource",
+                  "dynamodb:Scan",
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:TransactWriteItems"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/cloudhub-env-*-data"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "lambda:GetFunction",
+                  "lambda:GetFunctionConfiguration",
+                  "lambda:GetPolicy"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:cloudhub-env-*-data"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "apigateway:GET",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "logs:DescribeLogGroups"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ecs:DescribeClusters",
+                  "ecs:DescribeServices",
+                  "ecs:DescribeTasks",
+                  "ecs:ListTasks",
+                  "ecs:DescribeTaskDefinition",
+                  "ecs:DeleteTaskDefinitions"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "redshift-serverless:GetNamespace",
+                  "redshift-serverless:GetWorkgroup",
+                  "redshift-serverless:GetSnapshot",
+                  "redshift-serverless:ListSnapshots",
+                  "redshift-serverless:ListTagsForResource",
+                  "redshift-serverless:CreateSnapshot",
+                  "redshift-serverless:DeleteSnapshot",
+                  "redshift-serverless:CreateUsageLimit",
+                  "redshift-serverless:ListUsageLimits",
+                  "redshift-serverless:GetUsageLimit",
+                  "redshift-serverless:DeleteUsageLimit"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "redshift-data:ExecuteStatement",
+                  "redshift-data:BatchExecuteStatement",
+                  "redshift-data:DescribeStatement",
+                  "redshift-data:GetStatementResult",
+                  "redshift-data:CancelStatement"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "redshift-serverless:UpdateNamespace",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:redshift-serverless:${AWS::Region}:${AWS::AccountId}:namespace/*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    },
+                    "aws:ResourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "redshift.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudhub/${AWS::StackName}/prices"
+                }
+              },
+              {
+                "Fn::If": [
+                  "CostsEnabled",
+                  {
+                    "Effect": "Allow",
+                    "Action": [
+                      "ce:GetCostAndUsage",
+                      "ce:ListCostAllocationTags"
+                    ],
+                    "Resource": "*"
+                  },
+                  {
+                    "Ref": "AWS::NoValue"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "WorkerFunctionLog": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/${AWS::StackName}-worker"
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "ExpiryFunction": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-expiry"
+        },
+        "CodeUri": "../backend/",
+        "Handler": "cloudhub.runtime.expiry_handler",
+        "Runtime": "python3.13",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Timeout": 60,
+        "MemorySize": 256,
+        "Environment": {
+          "Variables": {
+            "TABLE_NAME": {
+              "Ref": "Table"
+            },
+            "PRICES_PARAMETER": {
+              "Ref": "RatesParameter"
+            },
+            "BUDGET_MILLIUSD": {
+              "Ref": "BudgetMilliusd"
+            },
+            "VERIFIED_TEMPLATES": {
+              "Ref": "VerifiedTemplates"
+            },
+            "VALIDATION_TEMPLATES": {
+              "Ref": "ValidationTemplates"
+            },
+            "USER_LIMIT": {
+              "Ref": "UserLimit"
+            },
+            "TOTAL_LIMIT": {
+              "Ref": "TotalLimit"
+            },
+            "STATE_MACHINE_ARN": {
+              "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+            },
+            "USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "ALERT_TOPIC_ARN": {
+              "Ref": "AlertTopic"
+            },
+            "ALERT_EMAIL": {
+              "Ref": "AlertEmail"
+            },
+            "ACTUAL_COSTS_ENABLED": {
+              "Ref": "ActualCostsEnabled"
+            }
+          }
+        },
+        "Policies": [
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:TransactWriteItems",
+                  "dynamodb:Query",
+                  "dynamodb:Scan"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": [
+                      "Table",
+                      "Arn"
+                    ]
+                  },
+                  {
+                    "Fn::Sub": "${Table.Arn}/index/*"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": "states:StartExecution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudhub/${AWS::StackName}/prices"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ExpiryFunctionLog": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/${AWS::StackName}-expiry"
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "SweepFunction": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-sweep"
+        },
+        "CodeUri": "../backend/",
+        "Handler": "cloudhub.runtime.sweep_handler",
+        "Runtime": "python3.13",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Timeout": 60,
+        "MemorySize": 256,
+        "Environment": {
+          "Variables": {
+            "TABLE_NAME": {
+              "Ref": "Table"
+            },
+            "PRICES_PARAMETER": {
+              "Ref": "RatesParameter"
+            },
+            "BUDGET_MILLIUSD": {
+              "Ref": "BudgetMilliusd"
+            },
+            "VERIFIED_TEMPLATES": {
+              "Ref": "VerifiedTemplates"
+            },
+            "VALIDATION_TEMPLATES": {
+              "Ref": "ValidationTemplates"
+            },
+            "USER_LIMIT": {
+              "Ref": "UserLimit"
+            },
+            "TOTAL_LIMIT": {
+              "Ref": "TotalLimit"
+            },
+            "STATE_MACHINE_ARN": {
+              "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+            },
+            "DRIVER_SETTINGS": {
+              "Fn::Sub": "{\"vpc_id\":\"${VpcId}\",\"public_subnet_id\":\"${PublicSubnetId}\",\"availability_zone\":\"${AvailabilityZone}\",\"ami_id\":\"${AmiId}\",\"ssh_cidr\":\"${SshCidr}\",\"instance_profile\":\"${SessionProfile}\",\"cf_role_arn\":\"${EnvironmentCfRole.Arn}\",\"schedule_group\":\"${ScheduleGroup}\",\"expiry_arn\":\"arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-expiry\",\"scheduler_role\":\"${SchedulerRole.Arn}\",\"dlq_arn\":\"${Dlq.Arn}\",\"backup_vault\":\"${BackupVault}\",\"backup_role\":\"${BackupRole.Arn}\",\"s3_backup_bucket\":\"${S3BackupBucket}\",\"account_id\":\"${AWS::AccountId}\",\"region\":\"${AWS::Region}\",\"public_subnet_ids\":[\"${PublicSubnetId}\",\"${PublicSubnet2Id}\"],\"db_subnet_ids\":[\"${DbSubnet1Id}\",\"${DbSubnet2Id}\"],\"postgres_version\":\"${PostgresVersion}\",\"approved_image\":\"${ApprovedImage}\",\"permissions_boundary\":\"${EnvironmentBoundary}\",\"management_table\":\"${Table}\",\"management_table_arn\":\"${Table.Arn}\",\"cognito_client_id\":\"${UserClient}\",\"cognito_issuer\":\"https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}\",\"backup_restore_role\":\"${BackupRestoreRole.Arn}\",\"frontend_origin\":\"https://${FrontendDistribution.DomainName}\"}"
+            },
+            "USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "ALERT_TOPIC_ARN": {
+              "Ref": "AlertTopic"
+            },
+            "ALERT_EMAIL": {
+              "Ref": "AlertEmail"
+            },
+            "ACTUAL_COSTS_ENABLED": {
+              "Ref": "ActualCostsEnabled"
+            }
+          }
+        },
+        "Policies": [
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:TransactWriteItems",
+                  "dynamodb:Query",
+                  "dynamodb:Scan"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": [
+                      "Table",
+                      "Arn"
+                    ]
+                  },
+                  {
+                    "Fn::Sub": "${Table.Arn}/index/*"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "cloudformation:CreateStack",
+                  "cloudformation:DeleteStack",
+                  "cloudformation:DescribeStacks",
+                  "cloudformation:ListStackResources"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/cloudhub-env-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:Describe*"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:StopInstances",
+                  "ec2:StartInstances"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    },
+                    "ec2:ResourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ssm:DescribeInstanceInformation",
+                  "ssm:GetCommandInvocation"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ec2/keypair/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:SendCommand",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:SendCommand",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "ssm:resourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "scheduler:CreateSchedule"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "backup:StartBackupJob",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "BackupVault",
+                    "Arn"
+                  ]
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "backup:DescribeBackupJob",
+                  "backup:DeleteRecoveryPoint"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "EnvironmentCfRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "cloudformation.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "SchedulerRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "scheduler.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "BackupRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "backup.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetBucketTagging",
+                  "s3:ListBucket",
+                  "s3:ListBucketVersions",
+                  "s3:GetBucketPolicy"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:GetObjectVersion",
+                  "s3:PutObject",
+                  "s3:DeleteObject",
+                  "s3:DeleteObjectVersion"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::cloudhub-${AWS::AccountId}-${AWS::Region}-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "s3:ListBucket",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "S3BackupBucket",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringLike": {
+                    "s3:prefix": "recovery/rp-*/*"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "s3:DeleteObject"
+                ],
+                "Resource": {
+                  "Fn::Sub": "${S3BackupBucket.Arn}/recovery/rp-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudfront:GetDistribution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudfront:GetOriginAccessControl",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "rds:DescribeDBInstances",
+                  "rds:DescribeDBSnapshots",
+                  "rds:DescribeDBSubnetGroups"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "rds:CreateDBSnapshot",
+                  "rds:DeleteDBSnapshot",
+                  "rds:AddTagsToResource",
+                  "rds:ListTagsForResource"
+                ],
+                "Resource": [
+                  {
+                    "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:cloudhub-env-*"
+                  },
+                  {
+                    "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:cloudhub-rp-*"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "autoscaling:DescribeAutoScalingGroups",
+                  "autoscaling:DescribePolicies",
+                  "elasticloadbalancing:Describe*"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudwatch:DescribeAlarms",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:TargetTracking-cloudhub-env-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "iam:GetRole"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:GetInstanceProfile",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/cloudhub-env-*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "secretsmanager:DescribeSecret",
+                  "secretsmanager:TagResource"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "secretsmanager:GetSecretValue",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "secretsmanager:ResourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "elasticfilesystem:DescribeFileSystems",
+                  "elasticfilesystem:DescribeMountTargets",
+                  "elasticfilesystem:ListTagsForResource"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "backup:StartRestoreJob",
+                  "backup:DescribeRestoreJob",
+                  "backup:ListRecoveryPointsByBackupVault",
+                  "backup:ListTags"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::GetAtt": [
+                    "BackupRestoreRole",
+                    "Arn"
+                  ]
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "backup.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:DescribeTable",
+                  "dynamodb:ListTagsOfResource",
+                  "dynamodb:Scan",
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:TransactWriteItems"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/cloudhub-env-*-data"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "lambda:GetFunction",
+                  "lambda:GetFunctionConfiguration",
+                  "lambda:GetPolicy"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:cloudhub-env-*-data"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "apigateway:GET",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "logs:DescribeLogGroups"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ecs:DescribeClusters",
+                  "ecs:DescribeServices",
+                  "ecs:DescribeTasks",
+                  "ecs:ListTasks",
+                  "ecs:DescribeTaskDefinition",
+                  "ecs:DeleteTaskDefinitions"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "redshift-serverless:GetNamespace",
+                  "redshift-serverless:GetWorkgroup",
+                  "redshift-serverless:GetSnapshot",
+                  "redshift-serverless:ListSnapshots",
+                  "redshift-serverless:ListTagsForResource",
+                  "redshift-serverless:CreateSnapshot",
+                  "redshift-serverless:DeleteSnapshot",
+                  "redshift-serverless:CreateUsageLimit",
+                  "redshift-serverless:ListUsageLimits",
+                  "redshift-serverless:GetUsageLimit",
+                  "redshift-serverless:DeleteUsageLimit"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "redshift-data:ExecuteStatement",
+                  "redshift-data:BatchExecuteStatement",
+                  "redshift-data:DescribeStatement",
+                  "redshift-data:GetStatementResult",
+                  "redshift-data:CancelStatement"
+                ],
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    }
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "redshift-serverless:UpdateNamespace",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:redshift-serverless:${AWS::Region}:${AWS::AccountId}:namespace/*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "aws:RequestedRegion": {
+                      "Ref": "AWS::Region"
+                    },
+                    "aws:ResourceTag/cloudhub:managed": "true"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*"
+                },
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "redshift.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "states:StartExecution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "states:DescribeExecution",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-lifecycle:*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudhub/${AWS::StackName}/prices"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "SweepFunctionLog": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/${AWS::StackName}-sweep"
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "StateMachine": {
+      "Type": "AWS::Serverless::StateMachine",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-lifecycle"
+        },
+        "Type": "STANDARD",
+        "DefinitionUri": "lifecycle.asl.json",
+        "DefinitionSubstitutions": {
+          "WorkerArn": {
+            "Fn::GetAtt": [
+              "WorkerFunction",
+              "Arn"
+            ]
+          }
+        },
+        "Policies": [
+          {
+            "LambdaInvokePolicy": {
+              "FunctionName": {
+                "Ref": "WorkerFunction"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "FallbackScan": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "GroupName": {
+          "Ref": "ScheduleGroup"
+        },
+        "ScheduleExpression": "rate(5 minutes)",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "SweepFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SweepSchedulerRole",
+              "Arn"
+            ]
+          },
+          "RetryPolicy": {
+            "MaximumRetryAttempts": 2,
+            "MaximumEventAgeInSeconds": 300
+          },
+          "DeadLetterConfig": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "Dlq",
+                "Arn"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "SweepSchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "cloudhub",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "lambda:InvokeFunction",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "SweepFunction",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sqs:SendMessage",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Dlq",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "FailureMetric": {
+      "Type": "AWS::Logs::MetricFilter",
+      "Properties": {
+        "LogGroupName": {
+          "Ref": "WorkerFunctionLog"
+        },
+        "FilterPattern": "{ $.event = \"CloudHubOperationFailed\" }",
+        "MetricTransformations": [
+          {
+            "MetricNamespace": "CloudHub",
+            "MetricName": "OperationFailed",
+            "MetricValue": "1"
+          }
+        ]
+      }
+    },
+    "AlertTopic": {
+      "Type": "AWS::SNS::Topic"
+    },
+    "FailureAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "CloudHub",
+        "MetricName": "OperationFailed",
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "ApiFunctionErrorAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "ApiFunction"
+            }
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "WorkerFunctionErrorAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "WorkerFunction"
+            }
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "SweepFunctionErrorAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "SweepFunction"
+            }
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "ExpiryFunctionErrorAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "ExpiryFunction"
+            }
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "DlqAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "AWS/SQS",
+        "MetricName": "ApproximateNumberOfMessagesVisible",
+        "Dimensions": [
+          {
+            "Name": "QueueName",
+            "Value": {
+              "Fn::GetAtt": [
+                "Dlq",
+                "QueueName"
+              ]
+            }
+          }
+        ],
+        "Statistic": "Maximum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "OperationsDashboard": {
+      "Type": "AWS::CloudWatch::Dashboard",
+      "Properties": {
+        "DashboardName": {
+          "Fn::Sub": "${AWS::StackName}-operations"
+        },
+        "DashboardBody": {
+          "Fn::Sub": "{\"widgets\": [{\"type\": \"metric\", \"x\": 0, \"y\": 0, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"HTTP API latency / errors\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"AWS/ApiGateway\", \"Latency\", \"ApiId\", \"${HttpApi}\", {\"stat\": \"p95\"}], [\"AWS/ApiGateway\", \"5xx\", \"ApiId\", \"${HttpApi}\", {\"stat\": \"Sum\"}]], \"period\": 60}}, {\"type\": \"metric\", \"x\": 12, \"y\": 0, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Lifecycle failures and Lambda errors\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"CloudHub\", \"OperationFailed\"], [\"AWS/Lambda\", \"Errors\", \"FunctionName\", \"${WorkerFunction}\"], [\"AWS/Lambda\", \"Errors\", \"FunctionName\", \"${SweepFunction}\"]], \"stat\": \"Sum\", \"period\": 60}}]}"
+        }
+      }
+    },
+    "EmailSubscription": {
+      "Type": "AWS::SNS::Subscription",
+      "Condition": "HasAlertEmail",
+      "Properties": {
+        "TopicArn": {
+          "Ref": "AlertTopic"
+        },
+        "Protocol": "email",
+        "Endpoint": {
+          "Ref": "AlertEmail"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "FrontendUrl": {
+      "Value": {
+        "Fn::Sub": "https://${FrontendDistribution.DomainName}"
+      }
+    },
+    "FrontendBucket": {
+      "Value": {
+        "Ref": "FrontendBucket"
+      }
+    },
+    "DistributionId": {
+      "Value": {
+        "Ref": "FrontendDistribution"
+      }
+    },
+    "ApiUrl": {
+      "Value": {
+        "Fn::Sub": "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+      }
+    },
+    "UserPoolId": {
+      "Value": {
+        "Ref": "UserPool"
+      }
+    },
+    "ClientId": {
+      "Value": {
+        "Ref": "UserClient"
+      }
+    },
+    "CognitoDomain": {
+      "Value": {
+        "Fn::Sub": "https://${UserDomain}.auth.${AWS::Region}.amazoncognito.com"
+      }
+    },
+    "AlertTopic": {
+      "Value": {
+        "Ref": "AlertTopic"
+      }
+    },
+    "TableName": {
+      "Value": {
+        "Ref": "Table"
+      }
+    },
+    "BackupVault": {
+      "Value": {
+        "Ref": "BackupVault"
+      }
+    },
+    "S3BackupBucket": {
+      "Value": {
+        "Ref": "S3BackupBucket"
+      }
+    },
+    "Region": {
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    }
+  }
+}

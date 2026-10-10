@@ -1,0 +1,26 @@
+name: Local validation (no AWS deployment)
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      - run: npm ci
+      - run: python scripts/generate_infra.py
+      - run: python scripts/generate_network.py
+      - run: python scripts/generate_openapi.py
+      - run: python scripts/check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-validation-only
+          path: docs/local-check-results.json

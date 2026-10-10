@@ -1,0 +1,7 @@
+{
+  "name": "cloudhub-local-checks",
+  "version": "0.4.0",
+  "private": true,
+  "scripts": {"test:frontend": "node --test tests/frontend.test.mjs"},
+  "devDependencies": {"linkedom": "0.18.12"}
+}

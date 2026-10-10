@@ -10,6 +10,7 @@ Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diệ
 
 AWS CLI dùng phiên tạm thời được người dùng duyệt, ngân sách 120 USD credits / 0 USD tiền mặt, không nâng Paid Plan. `cloudhub-network` vẫn CREATE_COMPLETE. Các stack thất bại cũ được giữ và dữ liệu retained đã kiểm kê để tái sử dụng; backend mới không phụ thuộc CDN CloudFront của giao diện. T02 vẫn cần quyền tạo CloudFront, T06 cần image ECR được duyệt, T10 cần kiểm plan/quota riêng. SNS đã có đăng ký email được xác nhận và AWS đã nhận yêu cầu cảnh báo thử từ giao diện; chưa xác minh thư đến hộp thư. Cost Explorer chưa bật.
 
+- [Trạng thái triển khai thật](docs/pages-live-status.md): T07 đã mở, kết quả đo tải 20 người dùng và các điều kiện còn thiếu.
 - [Báo cáo tổng hợp](docs/progress.md): phần có mã, kết quả kiểm tra và điểm chặn.
 - [Phiếu tài nguyên và dự toán](docs/deployment-review.md): khoảng 99,438 USD gross cho hai vòng mỗi mẫu; ngân sách 120 USD credits, tiền mặt 0 USD đã được duyệt. Billing thực tế có độ trễ.
 - [Hướng dẫn triển khai và thu hồi](docs/deployment.md), [minh chứng/demo](docs/demo-evidence.md), [10 mẫu và phạm vi bản sao](docs/templates.md).

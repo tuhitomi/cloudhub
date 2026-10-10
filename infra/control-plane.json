@@ -730,7 +730,7 @@
                 "logs:PutLogEvents"
               ],
               "Resource": {
-                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*cloudhub-env-*:*"
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*cloudhub-env-*"
               }
             },
             {
@@ -1346,7 +1346,8 @@
                 "apigateway:GET",
                 "apigateway:POST",
                 "apigateway:DELETE",
-                "apigateway:PATCH"
+                "apigateway:PATCH",
+                "apigateway:TagResource"
               ],
               "Resource": {
                 "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*"
@@ -1355,15 +1356,37 @@
             {
               "Effect": "Allow",
               "Action": [
+                "apigateway:GET",
+                "apigateway:POST",
+                "apigateway:DELETE"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/arn%3A${AWS::Partition}%3Aapigateway%3A${AWS::Region}%3A%3A%2Fv2%2Fapis%2F*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
                 "logs:CreateLogGroup",
-                "logs:DescribeLogGroups",
                 "logs:DeleteLogGroup",
                 "logs:PutRetentionPolicy",
                 "logs:TagResource",
                 "logs:ListTagsForResource"
               ],
               "Resource": {
-                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*cloudhub-env-*:*"
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*cloudhub-env-*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "logs:DescribeLogGroups",
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
               }
             },
             {

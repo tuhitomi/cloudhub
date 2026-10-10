@@ -17,7 +17,8 @@ def extend(params,r,settings,cf,worker):
     own_role=sub('arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cloudhub-env-*')
     own_profile=sub('arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/cloudhub-env-*')
     data_table=arn('dynamodb','table/cloudhub-env-*-data')
-    log_groups=arn('logs','log-group:*cloudhub-env-*:*')
+    # Tag APIs use the log-group ARN without ':*'; streams add a suffix.
+    log_groups=arn('logs','log-group:*cloudhub-env-*')
     # A managed boundary is evaluated in addition to each exact inline application policy.
     boundary=[policy(['ssm:UpdateInstanceInformation','ssmmessages:CreateControlChannel','ssmmessages:CreateDataChannel','ssmmessages:OpenControlChannel','ssmmessages:OpenDataChannel','ecr:GetAuthorizationToken']),
         policy(['ecr:BatchCheckLayerAvailability','ecr:GetDownloadUrlForLayer','ecr:BatchGetImage'],arn('ecr','repository/*')),
@@ -51,8 +52,12 @@ def extend(params,r,settings,cf,worker):
         policy(['elasticfilesystem:CreateFileSystem','elasticfilesystem:DescribeFileSystems','elasticfilesystem:DescribeMountTargets','elasticfilesystem:DescribeMountTargetSecurityGroups','elasticfilesystem:DescribeBackupPolicy','elasticfilesystem:TagResource','elasticfilesystem:ListTagsForResource','elasticfilesystem:CreateMountTarget','elasticfilesystem:DeleteMountTarget','elasticfilesystem:DeleteFileSystem','elasticfilesystem:PutBackupPolicy'],condition=region),
         policy(['dynamodb:CreateTable','dynamodb:DescribeTable','dynamodb:DeleteTable','dynamodb:TagResource','dynamodb:ListTagsOfResource'],data_table),
         policy(['lambda:CreateFunction','lambda:GetFunction','lambda:GetFunctionConfiguration','lambda:DeleteFunction','lambda:AddPermission','lambda:RemovePermission','lambda:GetPolicy','lambda:TagResource','lambda:UntagResource','lambda:PutFunctionConcurrency','lambda:DeleteFunctionConcurrency'],arn('lambda','function:cloudhub-env-*-data')),
-        policy(['apigateway:GET','apigateway:POST','apigateway:DELETE','apigateway:PATCH'],sub('arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*')),
-        policy(['logs:CreateLogGroup','logs:DescribeLogGroups','logs:DeleteLogGroup','logs:PutRetentionPolicy','logs:TagResource','logs:ListTagsForResource'],log_groups),
+        policy(['apigateway:GET','apigateway:POST','apigateway:DELETE','apigateway:PATCH','apigateway:TagResource'],sub('arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*')),
+        # CloudFormation's HTTP API tag requests use a URL-encoded API ARN.
+        # Keep this grant on v2 API tags in the configured region.
+        policy(['apigateway:GET','apigateway:POST','apigateway:DELETE'],sub('arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/arn%3A${AWS::Partition}%3Aapigateway%3A${AWS::Region}%3A%3A%2Fv2%2Fapis%2F*')),
+        policy(['logs:CreateLogGroup','logs:DeleteLogGroup','logs:PutRetentionPolicy','logs:TagResource','logs:ListTagsForResource'],log_groups),
+        policy('logs:DescribeLogGroups',condition=region),
         policy(['ecs:CreateCluster','ecs:DeleteCluster','ecs:CreateService','ecs:DeleteService','ecs:UpdateService','ecs:DescribeClusters','ecs:DescribeServices','ecs:RegisterTaskDefinition','ecs:DeregisterTaskDefinition','ecs:DescribeTaskDefinition','ecs:TagResource','ecs:UntagResource','ecs:ListTagsForResource'],condition=region),
         policy(['redshift-serverless:CreateNamespace','redshift-serverless:DeleteNamespace','redshift-serverless:UpdateNamespace','redshift-serverless:GetNamespace','redshift-serverless:CreateWorkgroup','redshift-serverless:DeleteWorkgroup','redshift-serverless:UpdateWorkgroup','redshift-serverless:GetWorkgroup','redshift-serverless:RestoreFromSnapshot','redshift-serverless:GetSnapshot','redshift-serverless:TagResource','redshift-serverless:ListTagsForResource'],condition=region)
     ])

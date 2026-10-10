@@ -1,5 +1,6 @@
 """Run local validation, record real results. AWS lifecycle evidence is separate."""
 import contextlib
+import copy
 import compileall
 import io
 import json
@@ -39,7 +40,26 @@ def main():
         settings={'availability_zone':'us-east-1a','ami_id':'ami-0123456789abcdef0','vpc_id':'vpc-0123456789abcdef0','public_subnet_id':'subnet-0123456789abcdef0','instance_profile':'shared-ssm','ssh_cidr':'192.0.2.1/32'}
         sources=[('control_plane',paths[0].read_text()),('optional_shared_network',(ROOT/'infra/network.json').read_text())]
         from generate_infra import build_template
+        permissions = copy.deepcopy(build_template())
+        # SAM function Policies are opaque to some lint rules. Validate the
+        # same documents as IAM roles so invalid actions fail before AWS.
+        for name, resource in list(permissions['Resources'].items()):
+            if resource['Type'] == 'AWS::Serverless::Function':
+                docs = resource['Properties'].get('Policies', [])
+            elif resource['Type'] == 'AWS::IAM::ManagedPolicy':
+                docs = [resource['Properties']['PolicyDocument']]
+            else:
+                continue
+            if docs:
+                permissions['Resources']['Checked' + name + 'Role'] = {'Type': 'AWS::IAM::Role', 'Properties': {
+                    'AssumeRolePolicyDocument': {'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow',
+                        'Principal': {'Service': 'lambda.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]},
+                    'Policies': [{'PolicyName': 'checked' + str(i), 'PolicyDocument': doc}
+                                 for i, doc in enumerate(docs) if isinstance(doc, dict) and 'Statement' in doc]}}
+        sources.append(('control_plane_permission_documents', json.dumps(permissions)))
         sources.append(('control_plane_external_frontend', json.dumps(build_template('https://example.github.io/cloudhub/'))))
+        sources.append(('control_plane_retained_data', json.dumps(build_template('https://example.github.io/cloudhub/',
+            {'Table':'cloudhub-retained-table','BackupVault':'cloudhub-retained-data','S3BackupBucket':'cloudhub-retained-bucket'}))))
         for tid in ['T01','T05']:
             for snapshot in [None,'snap-0123456789abcdef0']:
                 source=json.dumps(linux_template({'environment_id':'env-validation','owner_id':'validation','template_id':tid},settings,snapshot))
@@ -62,7 +82,7 @@ def main():
                 sources.append((tid+('_restore' if recovery else '_create'),json.dumps(source)))
         for name,source in sources:
             errors=lint(source,regions=['us-east-1'])
-            blocking=[e for e in errors if e.rule.id.startswith('E')]
+            blocking=[e for e in errors if e.rule.id.startswith('E') or e.rule.id == 'W3037']
             checks.append({'name':'cfn_lint_'+name,'passed':not blocking,'output':[str(e) for e in errors]})
     except ImportError:
         checks.append({'name':'cfn_lint','passed':False,'blocked':'Install requirements-dev.txt'})

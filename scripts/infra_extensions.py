@@ -67,7 +67,7 @@ def extend(params,r,settings,cf,worker):
         policy(['elasticfilesystem:DescribeFileSystems','elasticfilesystem:DescribeMountTargets','elasticfilesystem:ListTagsForResource'],condition=region),
         policy(['backup:StartRestoreJob','backup:DescribeRestoreJob','backup:ListRecoveryPointsByBackupVault','backup:ListTags'],condition=region),
         policy('iam:PassRole',att('BackupRestoreRole'),{'StringEquals':{'iam:PassedToService':'backup.amazonaws.com'}}),
-        policy(['dynamodb:DescribeTable','dynamodb:ListTagsOfResource','dynamodb:Scan','dynamodb:GetItem','dynamodb:PutItem','dynamodb:TransactWriteItems'],data_table),
+        policy(['dynamodb:DescribeTable','dynamodb:ListTagsOfResource','dynamodb:Scan','dynamodb:GetItem','dynamodb:PutItem','dynamodb:UpdateItem','dynamodb:DeleteItem','dynamodb:ConditionCheckItem'],data_table),
         policy(['lambda:GetFunction','lambda:GetFunctionConfiguration','lambda:GetPolicy'],arn('lambda','function:cloudhub-env-*-data')),
         policy('apigateway:GET',sub('arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis*')),
         policy(['logs:DescribeLogGroups'],condition=region),

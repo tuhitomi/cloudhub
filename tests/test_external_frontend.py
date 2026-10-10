@@ -40,6 +40,26 @@ class ExternalFrontendTests(unittest.TestCase):
         self.assertIn('FrontendDistribution', build_template()['Resources'])
         self.assertEqual(frontend_urls('https://example.github.io/cloudhub')[0], 'https://example.github.io/cloudhub/')
 
+    def test_backup_permission_uses_supported_vault_attribute(self):
+        template = build_template('https://example.github.io/cloudhub/')
+        statements = template['Resources']['WorkerFunction']['Properties']['Policies'][0]['Statement']
+        start = next(p for p in statements if p.get('Action') == 'backup:StartBackupJob')
+        self.assertEqual(start['Resource'], {'Fn::GetAtt': ['BackupVault', 'BackupVaultArn']})
+
+    def test_retained_data_has_no_duplicate_creation_or_dangling_attributes(self):
+        names = {'Table': 'cloudhub-retained-table', 'BackupVault': 'cloudhub-retained-data',
+                 'S3BackupBucket': 'cloudhub-retained-bucket'}
+        template = build_template('https://example.github.io/cloudhub/', names)
+        for name, value in names.items():
+            self.assertNotIn(name, template['Resources'])
+            self.assertEqual(template['Parameters'][name]['Default'], value)
+        text = json.dumps(template)
+        self.assertNotIn('${Table.Arn}', text)
+        self.assertNotIn('${S3BackupBucket.Arn}', text)
+        for name in names:
+            self.assertNotIn('"Fn::GetAtt": ["' + name + '"', text)
+        self.assertEqual(template['Resources']['S3BackupBucketPolicy']['Properties']['Bucket'], {'Ref': 'S3BackupBucket'})
+
     def test_invalid_callbacks_and_private_config_are_rejected(self):
         for url in ['http://example.com/', '/cloudhub/', 'https://name:secret@example.com/',
                     'https://example.com/?code=x', 'https://example.com/#token', 'https://example.com:8443/']:

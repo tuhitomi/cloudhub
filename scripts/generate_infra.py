@@ -29,7 +29,42 @@ def frontend_urls(value):
     return origin + parsed.path.rstrip('/') + '/', origin
 
 
-def build_template(frontend_url=None):
+def reuse_data_resources(template, existing):
+    """Reference retained CloudHub data without deleting or duplicating it."""
+    arns = {
+        'Table': {'Arn': 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}'},
+        'BackupVault': {'BackupVaultArn': 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:${BackupVault}'},
+        'S3BackupBucket': {'Arn': 'arn:${AWS::Partition}:s3:::${S3BackupBucket}'},
+    }
+    if set(existing) != set(arns) or any(not isinstance(v, str) or not v for v in existing.values()):
+        raise ValueError('Retained data requires exact Table, BackupVault and S3BackupBucket names')
+    for name, value in existing.items():
+        del template['Resources'][name]
+        template['Parameters'][name] = {'Type': 'String', 'Default': value,
+            'Description': 'Existing CloudHub retained resource, inventoried before reuse'}
+
+    def visit(value):
+        if isinstance(value, dict):
+            if 'Fn::GetAtt' in value:
+                target = value['Fn::GetAtt']
+                name, attribute = target.split('.', 1) if isinstance(target, str) else target
+                if name in arns:
+                    return sub(arns[name][attribute])
+            if 'Fn::Sub' in value:
+                text = value['Fn::Sub']
+                if isinstance(text, str):
+                    for name, attributes in arns.items():
+                        for attribute, arn in attributes.items():
+                            text = text.replace('${' + name + '.' + attribute + '}', arn)
+                    return sub(text)
+            return {key: visit(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        return value
+    return visit(template)
+
+
+def build_template(frontend_url=None, existing_data=None):
     callback, origin = frontend_urls(frontend_url) if frontend_url else (None, None)
     r = {}
     params = {
@@ -101,7 +136,7 @@ def build_template(frontend_url=None):
             "s3:GetBucketVersioning", "s3:PutBucketVersioning", "s3:GetBucketPublicAccessBlock", "s3:PutBucketPublicAccessBlock",
             "s3:GetEncryptionConfiguration", "s3:PutEncryptionConfiguration", "s3:GetBucketOwnershipControls", "s3:PutBucketOwnershipControls",
             "s3:GetBucketPolicy", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:ListBucket"], env_bucket),
-        policy(["cloudfront:CreateDistribution", "cloudfront:CreateDistributionWithTags", "cloudfront:CreateOriginAccessControl"], "*"),
+        policy(["cloudfront:CreateDistribution", "cloudfront:CreateOriginAccessControl"], "*"),
         policy(["cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:UpdateDistribution", "cloudfront:DeleteDistribution",
             "cloudfront:TagResource", "cloudfront:UntagResource", "cloudfront:ListTagsForResource"], sub("arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*")),
         policy(["cloudfront:GetOriginAccessControl", "cloudfront:GetOriginAccessControlConfig", "cloudfront:UpdateOriginAccessControl", "cloudfront:DeleteOriginAccessControl"], sub("arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*"))])
@@ -118,7 +153,7 @@ def build_template(frontend_url=None):
     state_arn = sub("arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-lifecycle")
     r['RatesParameter']={'Type':'AWS::SSM::Parameter','Properties':{'Name':sub('/cloudhub/${AWS::StackName}/prices'),'Type':'String','Tier':'Standard','Value':ref('PricesJson')}}
     common = {"TABLE_NAME": ref("Table"), "PRICES_PARAMETER": ref('RatesParameter'), "BUDGET_MILLIUSD": ref("BudgetMilliusd"), "VERIFIED_TEMPLATES": ref("VerifiedTemplates"), "VALIDATION_TEMPLATES": ref("ValidationTemplates"), "USER_LIMIT": ref("UserLimit"), "TOTAL_LIMIT": ref("TotalLimit"), "STATE_MACHINE_ARN": state_arn}
-    data_policy = policy(["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:TransactWriteItems", "dynamodb:Query", "dynamodb:Scan"], [att("Table"), sub("${Table.Arn}/index/*")])
+    data_policy = policy(["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:ConditionCheckItem", "dynamodb:Query", "dynamodb:Scan"], [att("Table"), sub("${Table.Arn}/index/*")])
     start_policy = policy("states:StartExecution", state_arn)
     worker_policies = [data_policy,
         policy(["cloudformation:CreateStack", "cloudformation:DeleteStack", "cloudformation:DescribeStacks", "cloudformation:ListStackResources"], sub("arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/cloudhub-env-*/*")),
@@ -129,7 +164,7 @@ def build_template(frontend_url=None):
         policy("ssm:SendCommand", sub("arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript")),
         policy("ssm:SendCommand", sub("arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"), {"StringEquals": {"ssm:resourceTag/cloudhub:managed": "true"}}),
         policy(["scheduler:CreateSchedule"], sub("arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*")),
-        policy("backup:StartBackupJob", att("BackupVault")),
+        policy("backup:StartBackupJob", att("BackupVault", "BackupVaultArn")),
         policy(["backup:DescribeBackupJob", "backup:DeleteRecoveryPoint", 'backup:DescribeRecoveryPoint',
                 'backup:ListRecoveryPointsByBackupVault', 'backup:ListTags'], "*", region_cond),
         policy("iam:PassRole", att("EnvironmentCfRole"), {"StringEquals": {"iam:PassedToService": "cloudformation.amazonaws.com"}}),
@@ -209,18 +244,20 @@ def build_template(frontend_url=None):
         del outputs['FrontendBucket']
         del outputs['DistributionId']
     template = {"AWSTemplateFormatVersion": "2010-09-09", "Transform": "AWS::Serverless-2016-10-31", "Description": "CloudHub D01-D13 T01-T10 source; AWS validation required", "Parameters": params, "Conditions":conditions,"Resources": r, "Outputs": outputs}
-    return template
+    return reuse_data_resources(template, existing_data) if existing_data else template
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--frontend-url', help='External HTTPS frontend, including any project path. Omitting this keeps CloudFront hosting.')
     parser.add_argument('--out', type=Path, help='Dedicated template output; required with external hosting.')
+    parser.add_argument('--existing-data', type=Path, help='Inventoried retained data names; JSON with Table, BackupVault, S3BackupBucket')
     args = parser.parse_args()
     if args.frontend_url and not args.out:
         parser.error('--out is required for external hosting; preserve the default template')
     target = args.out or ROOT / 'infra/control-plane.json'
-    template = build_template(args.frontend_url)
+    existing = json.loads(args.existing_data.read_text(encoding='utf-8')) if args.existing_data else None
+    template = build_template(args.frontend_url, existing)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding='utf-8')
     print('Generated ' + str(target))

@@ -18,6 +18,8 @@ python scripts/generate_infra.py --frontend-url https://tuhitomi.github.io/cloud
 
 Triển khai backend bằng stack riêng sau kiểm kê tài nguyên retained của lần thất bại, kiểm Free Plan/credits, giá và changeset. Các quyền quản lý CloudFront của mẫu T02 vẫn có trong vai trò mẫu; bỏ CDN của giao diện không chứng minh tài khoản đã được xác minh hoặc T02 chạy được.
 
+Nếu bảng metadata, vault và bucket backup của một lần triển khai CloudHub thất bại đã được kiểm kê, có thể thêm `--existing-data /absolute/path/retained-data.json`. File chỉ có ba tên tài nguyên thực tế: `Table`, `BackupVault`, `S3BackupBucket`. Generator chuyển ba tài nguyên sang tham số tham chiếu, không tạo bản trùng, không xóa hoặc nhập quyền sở hữu CloudFormation. Cần kiểm account/region, nguồn stack, bảng ACTIVE và schema/index, bucket private/encrypted và nội dung trước khi dùng; giữ vòng đời dọn dữ liệu này riêng khỏi stack backend mới.
+
 Sau khi stack CREATE_COMPLETE hoặc UPDATE_COMPLETE, lấy outputs thật vào file local và tạo cấu hình công khai:
 
 ```sh

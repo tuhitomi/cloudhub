@@ -19,7 +19,9 @@ def extend(params, resources, common, policy, ref, sub, att):
     userpool=resources['UserPool']['Properties']
     userpool['AccountRecoverySetting']={'RecoveryMechanisms':[{'Name':'verified_email','Priority':1}]}
     client=resources['UserClient']['Properties']
+    client['ExplicitAuthFlows']=['ALLOW_USER_PASSWORD_AUTH','ALLOW_USER_SRP_AUTH','ALLOW_REFRESH_TOKEN_AUTH']
     client['AllowedOAuthScopes'].append('aws.cognito.signin.user.admin')
+    resources['HttpApi']['Properties']['Auth']['Authorizers']['CognitoJwt']['AuthorizationScopes']=['cloudhub/use','aws.cognito.signin.user.admin']
     client['RefreshTokenValidity']=1;client['TokenValidityUnits']['RefreshToken']='days'
     events=resources['ApiFunction']['Properties']['Events']
     routes=[('GET','/limits'),('GET','/notifications'),('GET','/operations'),

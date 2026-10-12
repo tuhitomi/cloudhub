@@ -6,7 +6,7 @@ def response(description,name='Object'):
     return {'description':description,'content':{'application/json':{'schema':schema_ref(name)}}}
 def param(name):return {'name':name,'in':'path','required':True,'schema':{'type':'string','pattern':'^[a-z0-9-]+$'}}
 def operation(opid,method='get',body=None,params=None,status='200',result='Object',idempotent=False):
-    op={'operationId':opid,'security':[{'Cognito':['cloudhub/use']}],'responses':{status:response('Accepted' if status=='202' else 'OK',result),
+    op={'operationId':opid,'security':[{'Cognito':['cloudhub/use']},{'CognitoAccessToken':[]}],'responses':{status:response('Accepted' if status=='202' else 'OK',result),
         '400':response('Invalid input','Error'),'401':response('Authentication required','Error'),'404':response('Owned entity not found','Error'),'409':response('Conflict, quota or verification gate','Error'),'500':response('Internal error','Error')}}
     op['parameters']=params or []
     if idempotent:op['parameters'].append({'name':'Idempotency-Key','in':'header','required':True,'schema':{'type':'string','pattern':'^[A-Za-z0-9_-]{8,100}$'}})
@@ -91,7 +91,8 @@ from portal_openapi import extend
 extend(paths,schemas,operation,param,schema_ref)
 
 doc={'openapi':'3.0.3','info':{'title':'CloudHub','version':'0.3.0','description':'T01–T10 source; AWS validation gate required. All IDs are server-generated. Epoch timestamps in UTC seconds.'},'servers':[{'url':'https://{api_id}.execute-api.{region}.amazonaws.com','variables':{'api_id':{'default':'REQUIRED'},'region':{'default':'REQUIRED'}}}],'paths':paths,'components':{'securitySchemes':{'Cognito':{'type':'oauth2','flows':{'authorizationCode':{'authorizationUrl':'https://REQUIRED.auth.REQUIRED.amazoncognito.com/oauth2/authorize','tokenUrl':'https://REQUIRED.auth.REQUIRED.amazoncognito.com/oauth2/token','scopes':{'cloudhub/use':'Use CloudHub'}}}}},'schemas':schemas}}
-doc['info']['version']='0.4.0'
+doc['components']['securitySchemes']['CognitoAccessToken']={'type':'http','scheme':'bearer','bearerFormat':'JWT','description':'Cognito access token from the same configured user pool and app client, with aws.cognito.signin.user.admin scope. API Gateway verifies signature, issuer, audience and scopes; backend checks access token type, enabled account, ownership and current admin membership.'}
+doc['info']['version']='0.4.2'
 doc['info']['description']+=' Password reset/change and email verification use Cognito directly; passwords never enter this API.'
 (ROOT/'docs/openapi.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
 print('Generated docs/openapi.json')

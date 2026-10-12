@@ -1,4 +1,5 @@
 import {createPortal} from './portal.js';
+import {createCognitoAuth,refreshCognito,cognitoRequest} from './auth.js';
 const $ = s => document.querySelector(s);
 const cfg = window.CLOUDHUB || {};
 let accessToken = sessionStorage.getItem('cloudhub_access_token');
@@ -18,9 +19,9 @@ function idempotency(scope){if(!commands.has(scope))commands.set(scope,crypto.ra
 async function api(path,options={}){if(!cfg.configured)throw Error('Chưa có cấu hình AWS. Chạy hướng dẫn triển khai sau khi được duyệt.');if(!accessToken)throw Error('Hãy đăng nhập để tiếp tục.');await ensureToken();const res=await fetch(cfg.apiBase+path,{...options,headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json',...options.headers}});const data=await res.json();if(!res.ok){if(res.status===401){accessToken=null;sessionStorage.removeItem('cloudhub_access_token');sessionStorage.removeItem('cloudhub_refresh_token');refreshToken=null;}throw Error(data.error?.message||'Lỗi API '+res.status);}return data;}
 function post(path,body={},key){return api(path,{method:'POST',body:JSON.stringify(body),headers:key?{'Idempotency-Key':key}:{}});}
 function b64(bytes){return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');}
-async function login(){if(!cfg.configured)return notice('Chưa cấu hình Cognito. Không có phiên AWS hoặc dữ liệu giả được tạo.');const verifier=b64(crypto.getRandomValues(new Uint8Array(32)));const state=crypto.randomUUID();sessionStorage.setItem('pkce',JSON.stringify({verifier,state}));const challenge=b64(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));const u=new URL(cfg.cognitoDomain+'/oauth2/authorize');u.search=new URLSearchParams({client_id:cfg.clientId,response_type:'code',scope:'openid email cloudhub/use aws.cognito.signin.user.admin',redirect_uri:cfg.redirectUri,state,code_challenge:challenge,code_challenge_method:'S256'});location.assign(u);}
+async function login(){authentication.open();}
 async function callback(){const query=new URLSearchParams(location.search);if(query.has('error'))throw Error('Đăng nhập thất bại: '+query.get('error'));if(!query.has('code'))return;const pkce=JSON.parse(sessionStorage.getItem('pkce')||'null');if(!pkce||query.get('state')!==pkce.state)throw Error('Phiên đăng nhập không hợp lệ.');const r=await fetch(cfg.cognitoDomain+'/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:cfg.clientId,code:query.get('code'),redirect_uri:cfg.redirectUri,code_verifier:pkce.verifier})});if(!r.ok)throw Error('Không đổi được mã đăng nhập.');const data=await r.json();accessToken=data.access_token;refreshToken=data.refresh_token||null;sessionStorage.setItem('cloudhub_access_token',accessToken);if(refreshToken)sessionStorage.setItem('cloudhub_refresh_token',refreshToken);sessionStorage.removeItem('pkce');history.replaceState({},'',location.pathname);}
-function logout(){sessionStorage.clear();accessToken=null;const u=new URL(cfg.cognitoDomain+'/logout');u.search=new URLSearchParams({client_id:cfg.clientId,logout_uri:cfg.redirectUri});location.assign(u);}
+async function logout(){const remembered=refreshToken,method=sessionStorage.getItem('cloudhub_auth_method');sessionStorage.clear();accessToken=null;refreshToken=null;if(method==='api'){try{if(remembered)await cognitoRequest(cfg,'RevokeToken',{ClientId:cfg.clientId,Token:remembered});}catch{/* Local logout still clears the session on network failure. */}location.assign(cfg.redirectUri);return;}const u=new URL(cfg.cognitoDomain+'/logout');u.search=new URLSearchParams({client_id:cfg.clientId,logout_uri:cfg.redirectUri});location.assign(u);}
 async function loadCatalog(){const {items}=await api('/templates');$('#catalog').replaceChildren();for(const t of items){catalogCache.set(t.template_id,t);const card=element('article',undefined,'card');card.append(element('span',t.template_id,'tag'),element('h3',t.name),element('p',t.purpose),element('small',t.services.join(' · ')));card.append(element('p',t.create_enabled?'Đã kiểm chứng AWS':t.status==='NOT_IMPLEMENTED'?'Chưa triển khai':'Có mã · Chưa kiểm chứng AWS','badge'));card.append(button('Chọn mẫu',()=>openCreate(t),!t.create_enabled));$('#catalog').append(card);}}
 const descriptions={
 T01:'Máy Linux nhỏ · root 16 GiB · ổ dữ liệu 8 GiB',T02:'Website tĩnh · 32 file, mỗi file 8 KiB',
@@ -112,7 +113,8 @@ $('#record-close').onclick=()=>$('#records-dialog').close();
 $('#file-form').onsubmit=ev=>submitFile(ev).catch(showError);
 $('#file-close').onclick=()=>$('#files-dialog').close();
 $('#file-input').onchange=()=>{const file=$('#file-input').files[0];if(file)$('#file-key').value=file.name;};
-$('#login').onclick=()=>login().catch(showError);$('#logout').onclick=logout;$('#refresh').onclick=()=>refresh().catch(showError);$('#cancel').onclick=()=>$('#create-dialog').close();$('#hours').onchange=()=>updateQuote().catch(showError);$('#create-form').onsubmit=submitCreate;
+const authentication=createCognitoAuth({cfg,onAuthenticated:async tokens=>{accessToken=tokens.access_token;refreshToken=tokens.refresh_token;sessionStorage.setItem('cloudhub_access_token',accessToken);sessionStorage.setItem('cloudhub_auth_method','api');if(refreshToken)sessionStorage.setItem('cloudhub_refresh_token',refreshToken);await start();}});
+$('#login').onclick=()=>login().catch(showError);$('#logout').onclick=()=>logout().catch(showError);$('#refresh').onclick=()=>refresh().catch(showError);$('#cancel').onclick=()=>$('#create-dialog').close();$('#hours').onchange=()=>updateQuote().catch(showError);$('#create-form').onsubmit=submitCreate;
 async function start(){await callback();$('#login').hidden=!!accessToken;$('#logout').hidden=!accessToken;if(!cfg.configured){notice('Chưa triển khai AWS. Cấu hình và minh chứng thật đang chờ xác nhận.');return;}if(!accessToken){notice('Đăng nhập để xem danh mục và quản lý môi trường.');return;}notice('Đã đăng nhập. Chỉ mẫu đã kiểm chứng mới cho phép tạo.');await Promise.all([loadCatalog(),refresh()]);if(portal.isAdmin())await portal.loadAdmin();}
 setInterval(async()=>{if(!accessToken||document.hidden)return;try{for(const [id,op]of operations){if(!['SUCCEEDED','FAILED','CANCELLED'].includes(op.status))operations.set(id,await api(op.admin_actor&&portal.isAdmin()?'/admin/operations/'+id:'/operations/'+id));}renderOperations();await refresh();}catch(e){showError(e);}},10000);
 async function mutate(path,body={}){const scope=path+'/'+JSON.stringify(body),result=await post(path,body,idempotency(scope));commands.delete(scope);return result;}
@@ -128,9 +130,10 @@ async function ensureToken(){
   if(Number(tokenClaims(accessToken).exp)*1000>Date.now()+60000)return;
   if(!refreshToken)throw Error('Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.');
   if(!refreshPromise)refreshPromise=(async()=>{
-    const response=await fetch(cfg.cognitoDomain+'/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:cfg.clientId,refresh_token:refreshToken})});
-    if(!response.ok)throw Error('Không làm mới được phiên. Hãy đăng nhập lại.');
-    const value=await response.json(),before=tokenClaims(accessToken),after=tokenClaims(value.access_token);
+    let value;
+    if(sessionStorage.getItem('cloudhub_auth_method')==='api')value=await refreshCognito(cfg,refreshToken,accessToken);
+    else{const response=await fetch(cfg.cognitoDomain+'/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:cfg.clientId,refresh_token:refreshToken})});if(!response.ok)throw Error('Không làm mới được phiên. Hãy đăng nhập lại.');value=await response.json();}
+    const before=tokenClaims(accessToken),after=tokenClaims(value.access_token);
     if(before.iss!==after.iss||before.sub!==after.sub)throw Error('Danh tính đăng nhập thay đổi. Hãy đăng nhập lại.');
     accessToken=value.access_token;refreshToken=value.refresh_token||refreshToken;
     sessionStorage.setItem('cloudhub_access_token',accessToken);sessionStorage.setItem('cloudhub_refresh_token',refreshToken);

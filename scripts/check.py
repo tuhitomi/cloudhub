@@ -19,10 +19,10 @@ def main():
     with contextlib.redirect_stdout(stream):
         result=unittest.TextTestRunner(stream=stream,verbosity=2).run(unittest.defaultTestLoader.discover(str(ROOT/'tests')))
     checks.append({'name':'unit_tests_LOCAL_MOCK','passed':result.wasSuccessful() and not result.skipped,'count':result.testsRun,'skipped':len(result.skipped),'output':stream.getvalue()})
-    for name in ['app.js','portal.js']:
+    for name in ['app.js','portal.js','auth.js']:
         syntax=subprocess.run(['node','--check',str(ROOT/'frontend'/name)],text=True,capture_output=True)
         checks.append({'name':'frontend_syntax_'+name,'passed':syntax.returncode==0,'output':syntax.stdout+syntax.stderr})
-    frontend=subprocess.run(['node','--test',str(ROOT/'tests/frontend.test.mjs')],cwd=ROOT,text=True,capture_output=True)
+    frontend=subprocess.run(['node','--test',str(ROOT/'tests/frontend.test.mjs'),str(ROOT/'tests/auth.test.mjs')],cwd=ROOT,text=True,capture_output=True)
     checks.append({'name':'frontend_DOM_tests_LOCAL_MOCK','passed':frontend.returncode==0,'output':frontend.stdout+frontend.stderr})
     try:
         from openapi_spec_validator import validate

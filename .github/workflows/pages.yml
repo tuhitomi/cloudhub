@@ -8,8 +8,10 @@ on:
       - 'backend/cloudhub/catalog.py'
       - 'scripts/build_pages_preview.py'
       - 'scripts/build_pages_live.py'
+      - 'scripts/build_pages_redirect.py'
       - 'scripts/generate_infra.py'
       - 'config/pages-public.json'
+      - 'config/pages-redirect.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -29,7 +31,9 @@ jobs:
       - uses: actions/configure-pages@v5
       - name: Build public browser assets
         run: |
-          if [ -f config/pages-public.json ]; then
+          if [ -f config/pages-redirect.json ]; then
+            python3 scripts/build_pages_redirect.py --config config/pages-redirect.json --out site
+          elif [ -f config/pages-public.json ]; then
             python3 scripts/build_pages_live.py --config config/pages-public.json --out site
           else
             python3 scripts/build_pages_preview.py --out site

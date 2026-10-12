@@ -22,7 +22,7 @@ def data_template(env,settings,recovery=None):
     r['Integration']={'Type':'AWS::ApiGatewayV2::Integration','Properties':{'ApiId':ref('DataApi'),'IntegrationType':'AWS_PROXY',
         'IntegrationUri':att('ReadFunction'),'PayloadFormatVersion':'2.0'}}
     r['Route']={'Type':'AWS::ApiGatewayV2::Route','Properties':{'ApiId':ref('DataApi'),'RouteKey':'GET /records','Target':sub('integrations/${Integration}'),
-        'AuthorizationType':'JWT','AuthorizerId':ref('Authorizer'),'AuthorizationScopes':['cloudhub/use']}}
+        'AuthorizationType':'JWT','AuthorizerId':ref('Authorizer'),'AuthorizationScopes':['cloudhub/use','aws.cognito.signin.user.admin']}}
     r['Stage']={'Type':'AWS::ApiGatewayV2::Stage','Properties':{'ApiId':ref('DataApi'),'StageName':'$default','AutoDeploy':True,
         'DefaultRouteSettings':{'ThrottlingBurstLimit':10,'ThrottlingRateLimit':5}}}
     r['InvokePermission']={'Type':'AWS::Lambda::Permission','Properties':{'FunctionName':ref('ReadFunction'),'Action':'lambda:InvokeFunction',

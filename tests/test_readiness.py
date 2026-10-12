@@ -9,6 +9,21 @@ from test_processors import ENV,S,client
 from botocore.stub import Stubber
 
 class ReadinessTests(unittest.TestCase):
+    def test_sdk_refresh_uses_regional_api_and_preserves_identity(self):
+        sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+        from access_token import TokenProvider
+        def token(sub,exp):return 'header.'+base64.urlsafe_b64encode(json.dumps({'sub':sub,'iss':'https://cognito-idp.ap-southeast-1.amazonaws.com/pool','client_id':'testclient','token_use':'access','exp':exp}).encode()).decode().rstrip('=')+'.signature'
+        values={'CLOUDHUB_ACCESS_TOKEN':token('alice',1000),'CLOUDHUB_REFRESH_TOKEN':'local-test-refresh','CLOUDHUB_AUTH_METHOD':'api','CLOUDHUB_REGION':'ap-southeast-1','CLOUDHUB_COGNITO_DOMAIN':'https://sandbox.auth.ap-southeast-1.amazoncognito.com','CLOUDHUB_CLIENT_ID':'testclient'}
+        with patch.dict(os.environ,values):provider=TokenProvider()
+        after=token('alice',9999999999)
+        with patch('urllib.request.urlopen',return_value=io.BytesIO(json.dumps({'AuthenticationResult':{'AccessToken':after}}).encode())) as request:
+            self.assertEqual(provider.get(),after)
+            self.assertEqual(request.call_args.args[0].full_url,'https://cognito-idp.ap-southeast-1.amazonaws.com/')
+            self.assertEqual(json.loads(request.call_args.args[0].data)['AuthFlow'],'REFRESH_TOKEN_AUTH')
+        provider.token=values['CLOUDHUB_ACCESS_TOKEN'];provider.region='us-east-1'
+        with patch('urllib.request.urlopen') as request:
+            with self.assertRaises(ValueError):provider.get()
+            request.assert_not_called()
     def test_refresh_preserves_subject_and_never_sends_to_unapproved_domain(self):
         sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
         from access_token import TokenProvider

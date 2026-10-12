@@ -35,7 +35,7 @@ def public_config(value):
 def build(destination, config):
     config = public_config(config)
     public = {name: (ROOT / 'frontend' / name).read_text(encoding='utf-8')
-              for name in ['index.html', 'style.css', 'app.js', 'portal.js']}
+              for name in ['index.html', 'style.css', 'app.js', 'portal.js', 'auth.js']}
     public['config.js'] = 'window.CLOUDHUB = Object.freeze(' + json.dumps(config, ensure_ascii=False) + ');\n'
     public['.nojekyll'] = ''
     target = Path(destination).resolve()

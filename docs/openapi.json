@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "CloudHub",
-    "version": "0.4.0",
+    "version": "0.4.2",
     "description": "T01–T10 source; AWS validation gate required. All IDs are server-generated. Epoch timestamps in UTC seconds. Password reset/change and email verification use Cognito directly; passwords never enter this API."
   },
   "servers": [
@@ -27,6 +27,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -112,6 +115,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -207,6 +213,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -290,6 +299,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -395,6 +407,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -490,6 +505,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -585,6 +603,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -678,6 +699,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -802,6 +826,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -897,6 +924,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -982,6 +1012,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1077,6 +1110,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1163,6 +1199,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1277,6 +1316,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1391,6 +1433,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1505,6 +1550,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1619,6 +1667,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1733,6 +1784,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1847,6 +1901,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -1961,6 +2018,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2075,6 +2135,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2180,6 +2243,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2265,6 +2331,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2350,6 +2419,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2435,6 +2507,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2550,6 +2625,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2665,6 +2743,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2760,6 +2841,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2875,6 +2959,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -2990,6 +3077,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3083,6 +3173,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3198,6 +3291,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3284,6 +3380,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3380,6 +3479,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3495,6 +3597,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3588,6 +3693,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3704,6 +3812,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3810,6 +3921,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -3916,6 +4030,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -4002,6 +4119,9 @@
             "Cognito": [
               "cloudhub/use"
             ]
+          },
+          {
+            "CognitoAccessToken": []
           }
         ],
         "responses": {
@@ -4104,6 +4224,12 @@
             }
           }
         }
+      },
+      "CognitoAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Cognito access token from the same configured user pool and app client, with aws.cognito.signin.user.admin scope. API Gateway verifies signature, issuer, audience and scopes; backend checks access token type, enabled account, ownership and current admin membership."
       }
     },
     "schemas": {

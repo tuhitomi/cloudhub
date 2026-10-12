@@ -86,7 +86,7 @@ def main():
             except urllib.error.HTTPError as exc:
                 if exc.code!=404:raise RuntimeError('T09 must hide another owner resource with 404')
         return {'unauthenticated':401,'different_owner':404}
-    def ssh_verify(env):
+    def ssh_probe(env):
         key,_=call('/environments/'+env['environment_id']+'/ssh-key')
         with tempfile.TemporaryDirectory(prefix='cloudhub-ssh-') as directory:
             if os.name=='nt':
@@ -99,10 +99,31 @@ def main():
             path=Path(directory)/'session.pem'
             fd=os.open(str(path),os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
             with os.fdopen(fd,'w') as out:out.write(key['private_key'])
+            if os.name=='nt':
+                # Windows can add an explicit OWNER RIGHTS ACE to a new file.
+                # OpenSSH rejects that ACE even when the parent DACL is private.
+                subprocess.run(['icacls',str(path),'/inheritance:r','/remove:g','*S-1-3-4',
+                                '/grant:r','*'+sid+':R'],check=True,capture_output=True,text=True)
             result=subprocess.run(['ssh','-i',str(path),'-o','BatchMode=yes','-o','ConnectTimeout=15','-o','StrictHostKeyChecking=accept-new',
                 '-o','UserKnownHostsFile='+str(Path(directory)/'known_hosts'),'ec2-user@'+env['public_ip'],'sha256sum /data/cycle.txt'],capture_output=True,text=True,timeout=30)
-            if result.returncode:raise RuntimeError('SSH access failed; approve this client CIDR and inspect readiness')
-            return result.stdout.strip()
+            return result
+    def ssh_verify(env,cycle):
+        for attempt in range(3):
+            result=ssh_probe(env)
+            if not result.returncode:return result.stdout.strip()
+            timeout='Connection timed out' in result.stderr
+            if not timeout or not config.get('ssh_backup_reconnect') or attempt==2:
+                raise RuntimeError('SSH access failed: '+(result.stderr.strip().splitlines()[-1] if result.stderr.strip() else str(result.returncode)))
+            # Some client networks cannot route to certain ephemeral AWS IPs.
+            # Use the product's normal backup/resume, preserve the data, and
+            # read its new address. Never widen SSH ingress or hide attempts.
+            reconnect,metric=call('/environments/'+env['environment_id']+'/backup',{})
+            cycle['commands'].append(metric)
+            backup_result=wait(reconnect)
+            current,_=call('/environments/'+env['environment_id'])
+            if current['status']!='READY' or current['owner_id']!=env['owner_id']:raise RuntimeError('Reconnect did not retain the owned ready environment')
+            cycle.setdefault('ssh_reconnect_backups',[]).append({'before_ip':env['public_ip'],'after_ip':current['public_ip'],'operation':backup_result})
+            env.clear();env.update(current)
     def data_read(env,cycle):
         op,metric=call('/environments/'+env['environment_id']+('/query_demo' if args.template=='T10' else '/list_records'),{})
         cycle['commands'].append(metric);value=wait(op)['result']
@@ -139,7 +160,7 @@ def main():
                 cycle['write_and_verify']={'record':item}
             else:
                 cycle['write_and_verify']=shell(env,"set -eu; printf '%s\\n' '"+fixture+"' > /data/cycle.txt; sync; sha256sum /data/cycle.txt")
-                if ssh_verify(env)!=cycle['write_and_verify']['stdout']:raise RuntimeError('SSH and SSM data differ')
+                if ssh_verify(env,cycle)!=cycle['write_and_verify']['stdout']:raise RuntimeError('SSH and SSM data differ')
                 cycle['ssh_access_verified']=True
             if args.template=='T05':
                 with urllib.request.urlopen(env['access_address'],timeout=10) as response:cycle['public_http_status']=response.status;response.read()
@@ -158,7 +179,7 @@ def main():
                 cycle['restored_checksum']={'record':cycle['write_and_verify']['record']}
             else:
                 cycle['restored_checksum']=shell(restored,'set -eu; sha256sum /data/cycle.txt')
-                if ssh_verify(restored)!=cycle['restored_checksum']['stdout']:raise RuntimeError('Restored SSH access mismatch')
+                if ssh_verify(restored,cycle)!=cycle['restored_checksum']['stdout']:raise RuntimeError('Restored SSH access mismatch')
             comparison='sha256' if args.template in {'T02','T06','T07'} else 'stdout' if args.template in {'T01','T05'} else 'record'
             if cycle['restored_checksum'][comparison]!=cycle['write_and_verify'][comparison]:raise RuntimeError('Restored checksum mismatch')
             rp,_=call('/recovery-points/'+backup['recovery_point']);cycle['recovery_point']=rp

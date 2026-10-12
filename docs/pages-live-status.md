@@ -1,33 +1,39 @@
-# Trạng thái CloudHub trên GitHub Pages và AWS
+# Trạng thái CloudHub trên AWS
 
-Cập nhật ngày 10/10/2026. Website: https://tuhitomi.github.io/cloudhub/. Giao diện được xuất bản bằng GitHub Pages; Cognito, HTTP API, Lambda, DynamoDB và workflow chạy thật trong stack `cloudhub-pages-live`, region `ap-southeast-1`. Stack đã `UPDATE_COMPLETE`. Không cần CloudFront cho giao diện dự phòng.
+Cập nhật ngày 12/10/2026. Website chính: https://d3qujq9kfq5gca.cloudfront.net/. Đã trở lại D01 theo kế hoạch gốc: S3 riêng tư + CloudFront/OAC. Cognito, HTTP API, Lambda, DynamoDB và workflow giữ nguyên stack `cloudhub-pages-live` tại `ap-southeast-1`, UPDATE_COMPLETE. AWS Support xác nhận tài khoản được xác minh và mở CloudFront lúc 12:39 ngày 12/10 theo giờ Việt Nam.
 
-## Chức năng đã kiểm tra thật
+## Đăng nhập và giao diện
 
-- Đăng nhập Cognito PKCE, đọc danh mục, xem hạn mức và màn hình quản trị qua website công khai.
-- T07: hai vòng độc lập tạo → ghi/đọc file → sao lưu → thu hồi nguồn → khôi phục sang môi trường mới → đối chiếu SHA-256 → thu hồi môi trường khôi phục. Cả hai vòng `PASS`; nguồn và môi trường khôi phục đều `DELETED`, báo cáo audit không còn residual/unknown. Gate T07 đã mở cho người dùng.
-- Trong hai vòng T07, 12 lệnh dài trả HTTP 202 dưới 2 giây; cao nhất 1.650,48 ms. Kết quả này chưa chứng minh SLA cho toàn bộ mẫu hoặc mọi điều kiện cold start.
-- Đăng ký SNS của email quản trị đã `CONFIRMED`. Tác vụ cảnh báo thử từ website đã được AWS nhận và trả Message ID. Chưa kiểm tra thư đến hộp thư người nhận.
+Domain Hosted UI timeout từ máy triển khai và trình duyệt người dùng. Người dùng đã phê duyệt đăng nhập API Cognito cho app client hiện tại, không cấp thêm IAM/root. Giao diện gửi mật khẩu trực tiếp bằng HTTPS tới Cognito, xử lý mật khẩu lần đầu/MFA và refresh; chỉ token vào sessionStorage. Issuer/audience/chữ ký/access-token, trạng thái tài khoản và owner/admin vẫn được kiểm tra.
 
-T09 đang kiểm tra vòng đời thật sau khi sửa quyền gắn tag API Gateway và CloudWatch Logs. Không mở gate của mẫu đang thử nghiệm từ kết quả lint/mock.
+Đã kiểm tra hai chủ thể thử thật: đăng nhập thành công, tài khoản thường bị từ chối quản trị HTTP 403. Trình duyệt hiển thị danh mục, hạn mức, môi trường và quản trị từ CloudFront. Sáu file public trả HTTP 200 đúng SHA-256; S3 trực tiếp trả 403. Link Pages cũ chuyển tới website AWS sau lần xuất bản tiếp theo.
 
-## Phép đo tải và điều kiện còn thiếu
+Tài khoản quản trị `24020341@vnu.edu.vn` vẫn FORCE_CHANGE_PASSWORD; chủ tài khoản tự nhập mật khẩu tạm từ thư mời và tự đặt mật khẩu mới. Không có mật khẩu người thật trong repo/báo cáo. Xem [phiếu thay đổi đăng nhập](cognito-api-signin-review.md).
 
-Phép đo đã dùng 20 Cognito subjects riêng biệt, 200 yêu cầu đọc và mức đồng thời 20. Có 192 HTTP 200, 8 lỗi; p95 trên toàn bộ mẫu là 665,55 ms. CloudWatch ghi nhận 8 Lambda throttles trong cùng cửa sổ đo. Do có lỗi, `read_target_met=false` dù p95 nhỏ hơn 2 giây. Quota Lambda thực tế của region là 10 concurrent executions.
+## Mẫu và kiểm thử thật
 
-Yêu cầu tự động tăng quota lên 30, không tạo Support case, bị AWS từ chối với `IllegalArgumentException`: giá trị yêu cầu phải lớn hơn default quota 1000. Không gửi yêu cầu 1001, không mở Support case mới và không nâng Paid Plan. Cần AWS giải quyết giới hạn tài khoản trước khi có thể nghiệm thu lại chỉ tiêu này.
+- T07: hai vòng độc lập tạo → ghi/đọc → sao lưu → thu hồi nguồn → restore mới → SHA-256 → thu hồi restore, đều PASS. Nguồn/restore DELETED, audit không residual/unknown. Gate đã mở.
+- T09: hai vòng độc lập đã PASS; có dữ liệu, backup/restore, kiểm owner và audit sạch. Gate đã mở. API dữ liệu của môi trường mới chấp nhận scope API Cognito của cùng pool/client; kiểm lại với phương thức đăng nhập mới có minh chứng riêng.
+- T01: đang kiểm lại. Máy và dữ liệu SSM hoạt động; SSH một máy thử đã đạt sau cập nhật IP /32 cho cùng máy triển khai. Máy tiếp theo timeout trước khi có gói SSH tới ENI dù sshd/rule đúng; đang chẩn đoán đường mạng. Không mở gate từ kiểm thử một phần.
+- T02: CloudFront đã mở quyền, chờ vòng đời thật theo thứ tự T01–T04.
+- T03/T04/T05/T08: có mã và lint/SDK tests; chưa đủ hai vòng AWS thật.
+- T06: đã build source của nhóm trên EC2 tạm, kiểm health, đẩy ECR tag immutable và khóa digest cùng account/region. Ảnh Python Alpine mới scan COMPLETE, không findings. Hai builder đã thu hồi; giữ repo/image để thử Fargate. Chưa mở gate trước hai vòng thật.
+- T10: Redshift Serverless trả SubscriptionRequiredException trong Free Plan. Không tự nâng Paid Plan.
 
-- T02 còn phụ thuộc việc AWS cho phép tạo CloudFront.
-- T06 chưa có image ECR digest được build và duyệt. Docker Engine trên máy hiện trả lỗi khi kiểm tra.
-- T10 trả `SubscriptionRequiredException` từ Redshift Serverless trong tài khoản hiện tại. Không tự chuyển Paid Plan.
-- Các mẫu khác chỉ được đánh dấu kiểm chứng sau hai vòng thật đạt yêu cầu.
-- Chỉ tiêu hết hạn tự nhiên và fallback chưa có kết quả đạt. Không dùng thu hồi thủ công để chứng minh hết hạn tự động.
-- Cost Explorer chưa bật; chưa có đối soát hóa đơn cuối cùng. Dự toán không phải chi phí AWS đã đo.
+T07 có 12 lệnh dài HTTP 202 dưới 2 giây, cao nhất 1.650,48 ms. T09 có 16 lệnh dài dưới 2 giây, cao nhất 1.434,99 ms. Chưa chứng minh SLA toàn bộ mẫu/cold start.
 
-## Bàn giao tài khoản và dữ liệu
+## Tải, hết hạn và vận hành
 
-Tài khoản quản trị `24020341@vnu.edu.vn` đã có thư mời Cognito, đang ở trạng thái `FORCE_CHANGE_PASSWORD`. Chủ tài khoản tự nhập mật khẩu mới trong lần đăng nhập đầu tiên; mật khẩu không được lưu trong repo hoặc báo cáo.
+Phép đo mới 12/10 dùng 20 Cognito subjects riêng, 200 yêu cầu, đồng thời 20: 169 HTTP 200, 31 lỗi, p95 209,30 ms. CloudWatch có 31 throttles trong cửa sổ tương ứng; quota Lambda region vẫn 10. read_target_met=false. Không bỏ lỗi để tính đạt. Phép đo trước: 192/200, 8 throttles, p95 665,55 ms; cũng không đạt.
 
-Tài khoản đo tải được vô hiệu hóa sau kiểm thử. Bản sao thử nghiệm được giữ theo chính sách 7 ngày; chúng vẫn có thể tiêu thụ credits. Môi trường lỗi được giữ khi chưa xác minh sao lưu/thu hồi sạch, không xóa nguồn để làm báo cáo đẹp hơn.
+Yêu cầu tự động tăng quota 30 bị AWS từ chối vì phải lớn hơn default quota 1000. Không yêu cầu 1001, không mở case hỗ trợ mới hay nâng Paid Plan. Cần AWS giải quyết giới hạn tài khoản để nghiệm thu tải.
 
-Minh chứng AWS, ảnh và cấu hình riêng nằm ngoài Git. Repository chỉ chứa file văn bản. Kiểm tra local hiện tại: 149 Python tests, 9 DOM tests và các kiểm tra cấu hình đạt. Kết quả local không thay thế minh chứng AWS.
+Fixture T07 cũ có timer riêng kích hoạt sau deadline 6 giây. CloudTrail xác nhận StartExecution do ExpiryFunctionRole; operation tự động SUCCEEDED, backup AVAILABLE, source DELETED, audit sạch. Observer liên tục đã dừng trước đó, nên báo cáo ghi rõ dựa vào timestamp AWS bền vững và CloudTrail. Phép thử fallback mới dùng phiên 1 giờ tự nhiên, chỉ tắt timer cá nhân của fixture; đang chờ quét 5 phút. Không sửa deadline hoặc thu hồi tay để tính đạt.
+
+SNS email quản trị CONFIRMED; AWS nhận cảnh báo thử và trả Message ID, chưa xác minh thư đến hộp thư. Một T09 CREATE_FAILED cũ còn cần xử lý vì metadata giữ một nguồn không tạo được; không xóa mù hoặc bỏ final-backup guard. Bản sao thử nghiệm giữ 7 ngày và vẫn có thể trừ credits. Cost Explorer chưa bật, chưa đối soát chi phí cuối cùng.
+
+## Nguồn và ngân sách
+
+Nguồn/API 0.4.2. Đã đạt 154 Python tests, 14 DOM tests, compile/syntax/OpenAPI/cfn-lint. Kiểm thử localhost chạy với quyền mạng cục bộ sau khi sandbox chặn socket; không bỏ qua test. Đây là local/mock, tách riêng AWS thật.
+
+Giữ Free Plan, ngân sách 120 USD credits / 0 USD tiền mặt đã duyệt. Credits đầu phiên đọc được 182,95 USD, có độ trễ billing và không phải hard cap. GitHub chỉ gồm file văn bản. Credentials, ảnh, ZIP, dependencies, cấu hình riêng và evidence chi tiết giữ ngoài Git.

@@ -1,4 +1,10 @@
-# Báo cáo tổng hợp CloudHub — 09/10/2026
+# Báo cáo tổng hợp CloudHub
+
+Trạng thái hiện hành ngày 12/10/2026: [website AWS](https://d3qujq9kfq5gca.cloudfront.net/) vận hành bằng S3 riêng tư + CloudFront/OAC theo kế hoạch gốc, giữ backend/dữ liệu/người dùng hiện có. AWS Support đã xác minh tài khoản. Đăng nhập API Cognito 0.4.2 đã được người dùng duyệt, triển khai và kiểm tra giao diện thật; hai tài khoản thử riêng xác nhận quyền quản trị/owner. T07 và T09 đạt 2/2 vòng AWS và mở gate. T01–T04 đang kiểm lần lượt; T06 có digest own-account quét sạch, chưa đủ vòng Fargate. T10 vẫn bị Free Plan từ chối.
+
+Kiểm tra local: 154 Python + 14 DOM tests cùng compile/syntax/OpenAPI/cfn-lint đạt. Phép đo tải mới 20 chủ thể/200 yêu cầu có 31 lỗi throttling, nên chưa đạt SLA. Timer T07 kích hoạt sau 6 giây được xác minh từ timestamp AWS/CloudTrail; fallback riêng đang chờ hạn 1 giờ. Xem [trạng thái thật hiện hành](pages-live-status.md) và [thay đổi đăng nhập đã áp dụng](cognito-api-signin-review.md). Các phần dưới là lịch sử, số vòng/URL/blocker tại từng thời điểm.
+
+## Lịch sử ngày 9–10/10/2026
 
 Cập nhật triển khai dự phòng 10/10/2026: [website GitHub Pages](https://tuhitomi.github.io/cloudhub/) đã kết nối stack AWS `cloudhub-pages-live` (UPDATE_COMPLETE) tại ap-southeast-1. Đăng nhập Cognito, danh mục, hạn mức và giao diện quản trị đã được kiểm tra trên website thật. Tài khoản quản trị đã có thư mời Cognito. Kiểm tra local hiện tại: 149 Python và 9 DOM tests đạt; CI và xuất bản Pages đã đạt ở commit kết nối backend. SNS đã có đăng ký email CONFIRMED; cảnh báo thử từ website trả Message ID, nhưng chưa xác minh người nhận đã nhận thư. Vòng đời AWS đang được kiểm tra riêng và gate vẫn chỉ mở theo bằng chứng; chưa nghiệm thu đủ 20 vòng/SLA. Xem [triển khai Pages](github-pages.md) và README cho trạng thái hiện hành.
 

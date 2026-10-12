@@ -13,8 +13,22 @@ import subprocess,tempfile,csv,io
 import re
 from datetime import datetime,timezone
 from pathlib import Path
-from access_token import TokenProvider
+from access_token import TokenProvider,claims
 from lifecycle_http import api_call
+
+def validate_created_source_resume(record,template,account,region,eid,owner):
+    """Only resume the same owned first source before any backup/retirement."""
+    if (record.get('mode')!='AWS_REAL' or record.get('account_id')!=account or record.get('region')!=region
+            or record.get('template_id')!=template or record.get('result') not in {'FAILED','RUNNING'}
+            or record.get('completed_cycles')!=0 or len(record.get('cycles',[]))!=1):
+        raise ValueError('Resume evidence does not match this AWS run')
+    cycle=record['cycles'][0];source=cycle.get('source_environment',{})
+    if (cycle.get('number')!=1 or source.get('environment_id')!=eid or source.get('owner_id')!=owner
+            or source.get('template_id')!=template or cycle.get('create_operation',{}).get('environment_id')!=eid
+            or any(k in cycle for k in ['backup_operation','destroy_operation','restore_operation','source_cleanup'])
+            or record.get('progress',{}).get('operation',{}).get('phase') in {'BACKUP','DELETE','AUDIT','RESUME','WAIT_RESUME'}):
+        raise ValueError('Resume requires the same source before backup or retirement')
+    return cycle
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -35,14 +49,37 @@ def main():
     ssm,ec2=session.client('ssm'),session.client('ec2')
     access,other_access=TokenProvider(),TokenProvider('CLOUDHUB_OTHER_')
     if access.token==other_access.token:raise SystemExit('Ownership verification requires a distinct Cognito user')
-    evidence={'mode':'AWS_REAL','started_at':datetime.now(timezone.utc).isoformat(),'account_id':identity['Account'],'region':config['region'],
+    evidence={'mode':'AWS_REAL','result':'RUNNING','started_at':datetime.now(timezone.utc).isoformat(),'account_id':identity['Account'],'region':config['region'],
               'template_id':args.template,'cycles':[],'completed_cycles':0,'warnings':['Retained snapshots/S3 copies remain billable until their 7-day policy expires.']}
+    out=Path(args.out)
+    out.parent.mkdir(parents=True,exist_ok=True)
+    resume_source=config.get('resume_created_sources',{}).get(args.template)
+    if resume_source:
+        prior=json.loads(out.read_text(encoding='utf-8'))
+        validate_created_source_resume(prior,args.template,identity['Account'],config['region'],resume_source,claims(access.token)['sub'])
+        prior.setdefault('resume_history',[]).append({'at':datetime.now(timezone.utc).isoformat(),
+            'previous_result':prior['result'],'previous_error':prior.get('error'),
+            'source_environment':resume_source,'reason':'Reviewed continuation of same owned source before backup; fresh data verification'})
+        prior.pop('error',None);prior.pop('finished_at',None);prior['result']='RUNNING';evidence=prior
+    def checkpoint(stage,operation=None):
+        evidence['progress']={'stage':stage,'updated_at':datetime.now(timezone.utc).isoformat()}
+        if operation:
+            evidence['progress']['operation']={k:operation[k] for k in ['operation_id','environment_id','status','phase','attempts'] if k in operation}
+        temporary=out.with_suffix(out.suffix+'.tmp')
+        temporary.write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf-8')
+        temporary.replace(out)
     def call(path,body=None):
         return api_call(args.api,path,body,access.get,evidence.setdefault('api_transport_retries',[]))
     def wait(op):
         end=time.monotonic()+7300
+        previous=None
         while time.monotonic()<end:
             current,_=call('/operations/'+op['operation_id'])
+            progress=(current['status'],current.get('phase'))
+            if progress!=previous:
+                checkpoint('WAIT_OPERATION',current)
+                print(args.template,current['operation_id'],current['status'],current.get('phase'),flush=True)
+                previous=progress
             if current['status']=='SUCCEEDED':return current
             if current['status']=='FAILED':raise RuntimeError(current.get('error','operation failed'))
             time.sleep(10)
@@ -147,11 +184,19 @@ def main():
         return read_http(env['access_address']+('/files/' if args.template=='T06' else '/')+'cycle.txt')
     try:
         for number in range(1,args.cycles+1):
-            cycle={'number':number,'commands':[]};evidence['cycles'].append(cycle)
             body={'template_id':args.template,'duration_hours':1,'validation_run':True}
-            create,metric=call('/environments',body);cycle['commands'].append(metric);cycle['create_operation']=create;wait(create)
+            if number==1 and resume_source:
+                cycle=evidence['cycles'][0];create=cycle['create_operation']
+                current,_=call('/environments/'+resume_source)
+                if current['status']!='READY' or current.get('lock') or current['deadline']<=time.time():
+                    raise RuntimeError('Reviewed source is no longer ready; stop before writing or creating replacements')
+            else:
+                cycle={'number':number,'commands':[]};evidence['cycles'].append(cycle)
+                create,metric=call('/environments',body);cycle['commands'].append(metric);cycle['create_operation']=create
+            wait(create)
             env,_=call('/environments/'+create['environment_id']);cycle['source_environment']=env
             cycle['authorization']=ownership_checks(env)
+            checkpoint('SOURCE_READY')
             fixture=uuid.uuid4().hex
             if args.template in {'T02','T06','T07'}:
                 write,metric=call('/environments/'+env['environment_id']+'/files',{'key':'cycle.txt','content_base64':base64.b64encode((fixture+'\n').encode()).decode(),'content_type':'text/plain'})
@@ -171,10 +216,12 @@ def main():
                 cycle['ssh_access_verified']=True
             if args.template=='T05':
                 with urllib.request.urlopen(env['access_address'],timeout=10) as response:cycle['public_http_status']=response.status;response.read()
+            checkpoint('SOURCE_DATA_VERIFIED')
             backup,metric=call('/environments/'+env['environment_id']+'/backup',{});cycle['commands'].append(metric);cycle['backup_operation']=wait(backup)
             destroy,metric=call('/environments/'+env['environment_id']+'/destroy',{});cycle['commands'].append(metric);cycle['destroy_operation']=wait(destroy)
             removed,_=call('/environments/'+env['environment_id']);cycle['source_cleanup']=removed['cleanup_report']
             if removed['status']!='DELETED':raise RuntimeError('Source has residual/unknown resources; resolve before claiming success')
+            checkpoint('SOURCE_RETIRED')
             body['recovery_point']=backup['recovery_point'];restore,metric=call('/environments',body);cycle['commands'].append(metric);cycle['restore_operation']=wait(restore)
             restored,_=call('/environments/'+restore['environment_id']);cycle['restored_environment']=restored
             if args.template in {'T02','T06','T07'}:
@@ -191,10 +238,12 @@ def main():
             if cycle['restored_checksum'][comparison]!=cycle['write_and_verify'][comparison]:raise RuntimeError('Restored checksum mismatch')
             rp,_=call('/recovery-points/'+backup['recovery_point']);cycle['recovery_point']=rp
             if not rp['restore_verified']:raise RuntimeError('Backend did not record data verification')
+            checkpoint('RESTORED_DATA_VERIFIED')
             cleanup,metric=call('/environments/'+restored['environment_id']+'/destroy',{});cycle['commands'].append(metric);cycle['restored_cleanup_operation']=wait(cleanup)
             final,_=call('/environments/'+restored['environment_id']);cycle['restored_cleanup']=final['cleanup_report']
             if final['status']!='DELETED':raise RuntimeError('Restored test resources remain')
             cycle['result']='PASS';evidence['completed_cycles']+=1
+            checkpoint('CYCLE_COMPLETE')
         evidence['long_command_under_2s']=all(m['http_status']==202 and m['latency_ms']<2000 for c in evidence['cycles'] for m in c['commands'])
         evidence['result']='PASS'
     except Exception as exc:
@@ -203,7 +252,7 @@ def main():
         raise
     finally:
         evidence['finished_at']=datetime.now(timezone.utc).isoformat()
-        out=Path(args.out);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf-8')
+        checkpoint('FINISHED')
         print('Evidence saved to',out)
 
 if __name__=='__main__':main()

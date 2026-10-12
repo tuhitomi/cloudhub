@@ -26,7 +26,7 @@ T01 có hai lệnh tạo HTTP 202 mất khoảng 10,8 giây, nên long_command_u
 
 Phép đo mới 12/10 dùng 20 Cognito subjects riêng, 200 yêu cầu, đồng thời 20: 169 HTTP 200, 31 lỗi, p95 209,30 ms. CloudWatch có 31 throttles trong cửa sổ tương ứng; quota Lambda region vẫn 10. read_target_met=false. Không bỏ lỗi để tính đạt. Phép đo trước: 192/200, 8 throttles, p95 665,55 ms; cũng không đạt.
 
-Yêu cầu tự động tăng quota 30 bị AWS từ chối vì phải lớn hơn default quota 1000. Không yêu cầu 1001, không mở case hỗ trợ mới hay nâng Paid Plan. Cần AWS giải quyết giới hạn tài khoản để nghiệm thu tải.
+Yêu cầu tự động tăng quota 30 trước đây bị AWS từ chối vì phải lớn hơn default quota 1000. Người dùng sau đó chốt giữ quota hiện tại 10 tác vụ Lambda đồng thời cho demo sinh viên và không gửi AWS Support. Vì vậy không xin tăng quota hoặc nâng Paid Plan; mục tiêu tải 20 người trước đây không còn là điều kiện nghiệm thu demo. Quota 10 tác vụ dùng chung toàn region, không phải số người dùng tối đa đã đo.
 
 Fixture T07 cũ có timer riêng kích hoạt sau deadline 6 giây. CloudTrail xác nhận StartExecution do ExpiryFunctionRole; operation tự động SUCCEEDED, backup AVAILABLE, source DELETED, audit sạch. Observer liên tục đã dừng trước đó, nên báo cáo ghi rõ dựa vào timestamp AWS bền vững và CloudTrail. Phép thử fallback mới dùng phiên 1 giờ tự nhiên, chỉ tắt timer cá nhân của fixture: quét kích hoạt sau 92 giây, operation SUCCEEDED, final backup AVAILABLE, nguồn DELETED và audit không residual/unknown. Không sửa deadline hoặc thu hồi tay để tính đạt. Observer lỗi ở lần tra cứu operation cuối; đã đối chiếu lại operation tự động xác định và timestamp AWS, ghi rõ việc sửa tra cứu trong evidence.
 

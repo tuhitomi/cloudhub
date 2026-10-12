@@ -217,12 +217,15 @@ def main():
             if args.template=='T05':
                 with urllib.request.urlopen(env['access_address'],timeout=10) as response:cycle['public_http_status']=response.status;response.read()
             checkpoint('SOURCE_DATA_VERIFIED')
-            backup,metric=call('/environments/'+env['environment_id']+'/backup',{});cycle['commands'].append(metric);cycle['backup_operation']=wait(backup)
-            destroy,metric=call('/environments/'+env['environment_id']+'/destroy',{});cycle['commands'].append(metric);cycle['destroy_operation']=wait(destroy)
+            backup,metric=call('/environments/'+env['environment_id']+'/backup',{});cycle['commands'].append(metric);cycle['backup_operation']=backup
+            checkpoint('BACKUP_SUBMITTED',backup);cycle['backup_operation']=wait(backup)
+            destroy,metric=call('/environments/'+env['environment_id']+'/destroy',{});cycle['commands'].append(metric);cycle['destroy_operation']=destroy
+            checkpoint('RETIREMENT_SUBMITTED',destroy);cycle['destroy_operation']=wait(destroy)
             removed,_=call('/environments/'+env['environment_id']);cycle['source_cleanup']=removed['cleanup_report']
             if removed['status']!='DELETED':raise RuntimeError('Source has residual/unknown resources; resolve before claiming success')
             checkpoint('SOURCE_RETIRED')
-            body['recovery_point']=backup['recovery_point'];restore,metric=call('/environments',body);cycle['commands'].append(metric);cycle['restore_operation']=wait(restore)
+            body['recovery_point']=backup['recovery_point'];restore,metric=call('/environments',body);cycle['commands'].append(metric);cycle['restore_operation']=restore
+            checkpoint('RESTORE_SUBMITTED',restore);cycle['restore_operation']=wait(restore)
             restored,_=call('/environments/'+restore['environment_id']);cycle['restored_environment']=restored
             if args.template in {'T02','T06','T07'}:
                 data=file_read(restored,cycle)
@@ -239,7 +242,8 @@ def main():
             rp,_=call('/recovery-points/'+backup['recovery_point']);cycle['recovery_point']=rp
             if not rp['restore_verified']:raise RuntimeError('Backend did not record data verification')
             checkpoint('RESTORED_DATA_VERIFIED')
-            cleanup,metric=call('/environments/'+restored['environment_id']+'/destroy',{});cycle['commands'].append(metric);cycle['restored_cleanup_operation']=wait(cleanup)
+            cleanup,metric=call('/environments/'+restored['environment_id']+'/destroy',{});cycle['commands'].append(metric);cycle['restored_cleanup_operation']=cleanup
+            checkpoint('RESTORED_RETIREMENT_SUBMITTED',cleanup);cycle['restored_cleanup_operation']=wait(cleanup)
             final,_=call('/environments/'+restored['environment_id']);cycle['restored_cleanup']=final['cleanup_report']
             if final['status']!='DELETED':raise RuntimeError('Restored test resources remain')
             cycle['result']='PASS';evidence['completed_cycles']+=1

@@ -10,7 +10,8 @@ def main():
         result=subprocess.run([sys.executable,str(Path(__file__).with_name('aws_lifecycle.py')),'--api',args.api,'--config',args.config,
             '--template',tid,'--cycles','2','--out',str(out/(tid+'.json')),'--approved-create-resources'])
         results.append({'template_id':tid,'exit_code':result.returncode})
-        (out/'run-summary.json').write_text(json.dumps({'actual_commands':results,'complete':len(results)==10 and all(r['exit_code']==0 for r in results)},indent=2))
+        (out/'run-summary.json').write_text(json.dumps({'expected_templates':config['validation_templates'],
+            'actual_commands':results,'complete':len(results)==len(config['validation_templates']) and all(r['exit_code']==0 for r in results)},indent=2))
         if result.returncode:return result.returncode
     return 0
 if __name__=='__main__':raise SystemExit(main())

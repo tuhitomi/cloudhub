@@ -66,6 +66,9 @@ def extend(params,r,settings,cf,worker):
     cf.append(policy('kms:DescribeKey',arn('kms','key/*'),{
         'StringEquals':{'aws:RequestedRegion':ref('AWS::Region')},
         'ForAnyValue:StringEquals':{'kms:ResourceAliases':['alias/aws/rds','alias/aws/secretsmanager']}}))
+    # ALB validates security-group/VPC associations through this metadata API.
+    cf.append(policy('ec2:GetSecurityGroupsForVpc',
+        sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}'),region))
     worker.extend([
         policy(['rds:DescribeDBInstances','rds:DescribeDBSnapshots','rds:DescribeDBSubnetGroups'],condition=region),
         policy(['rds:CreateDBSnapshot','rds:DeleteDBSnapshot','rds:AddTagsToResource','rds:ListTagsForResource'],[rds_db,rds_snap]),

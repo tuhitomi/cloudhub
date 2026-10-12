@@ -1480,6 +1480,20 @@
                   ]
                 }
               }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "ec2:GetSecurityGroupsForVpc",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
             }
           ]
         }

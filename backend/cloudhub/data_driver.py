@@ -5,9 +5,36 @@ from .data_template import data_template
 from .s3_driver import canonical
 from .s3_files import sha,error_code
 from .errors import HubError
+from .cf_common import name
+from datetime import datetime,timezone
 
 class DataDriver(ArchiveMixin,StackDriver):
     def build_template(self,env,recovery):return data_template(env,self.settings,recovery)
+    def inventory(self,env):
+        resources=super().inventory(env)
+        stack=self.assert_stack(env)
+        # CF can assign the intended table name before a failed CreateTable.
+        # Only a never-ready, terminal failed stack and an explicit DynamoDB
+        # NotFound can establish that this source was never provisioned.
+        expected=name(env,'-data')
+        terminal={'CREATE_FAILED','ROLLBACK_COMPLETE','ROLLBACK_FAILED'}
+        failed=stack and stack['StackStatus'] in terminal
+        prior=env.get('missing_uncreated_source',{})
+        previously_missing=(prior.get('id')==expected and prior.get('type')=='AWS::DynamoDB::Table'
+            and prior.get('error')=='ResourceNotFoundException' and prior.get('failed_stack_status') in terminal)
+        deleting=not stack or stack['StackStatus'] in {'DELETE_IN_PROGRESS','DELETE_COMPLETE'}
+        if env.get('ready_at') or not (failed or previously_missing and deleting):return resources
+        source=next((r for r in resources if r['type']=='AWS::DynamoDB::Table' and r['id']==expected),None)
+        if not source:return resources
+        try:self.dynamodb.describe_table(TableName=expected)
+        except Exception as exc:
+            if error_code(exc)!='ResourceNotFoundException':raise
+            env['source_ids']=[rid for rid in env['source_ids'] if rid!=expected]
+            env['missing_uncreated_source']={'type':'AWS::DynamoDB::Table','id':expected,'checked_at':int(datetime.now(timezone.utc).timestamp()),'error':'ResourceNotFoundException','failed_stack_status':stack['StackStatus'] if failed else prior['failed_stack_status']}
+        return resources
+    def audit(self,env,backups):
+        self.inventory(env)
+        return super().audit(env,backups)
     def apply_outputs(self,env):
         env.update(data_source=env['outputs']['TableName'],access_address=env['outputs']['ApiUrl'])
     def table(self,env):

@@ -8,7 +8,7 @@ Nguồn/API **0.4.2** có đăng nhập/refresh trực tiếp qua API Cognito đ
 
 Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diện tiếng Việt, Cognito, HTTP API, Lambda, DynamoDB, Standard Step Functions, Scheduler, CloudFormation và bản sao theo mẫu. Toàn bộ hệ thống vận hành trên AWS. GitHub chỉ lưu mã nguồn/tài liệu và chạy kiểm tra mã; workflow xuất bản Pages đã được gỡ theo yêu cầu. Gate AWS_VERIFIED của từng mẫu nằm ở backend.
 
-AWS CLI dùng phiên tạm thời được người dùng duyệt, ngân sách 120 USD credits / 0 USD tiền mặt, không nâng Paid Plan. `cloudhub-network` vẫn CREATE_COMPLETE. Dữ liệu retained đã được kiểm kê và tái sử dụng. T07 và T09 đã đạt hai vòng và mở gate; các mẫu còn lại đang kiểm tra riêng. T06 cần image ECR đã quét/review, T10 đang bị Free Plan từ chối Redshift. SNS đã có đăng ký email được xác nhận và AWS đã nhận cảnh báo thử từ giao diện; chưa xác minh thư đến hộp thư. Cost Explorer chưa bật.
+AWS CLI dùng phiên tạm thời được người dùng duyệt, ngân sách 120 USD credits / 0 USD tiền mặt, không nâng Paid Plan. `cloudhub-network` vẫn CREATE_COMPLETE. Dữ liệu retained đã được kiểm kê và tái sử dụng. T01, T07 và T09 đã đạt hai vòng; gate chỉ mở sau review; các mẫu còn lại đang kiểm tra riêng. T06 cần image ECR đã quét/review, T10 đang bị Free Plan từ chối Redshift. SNS đã có đăng ký email được xác nhận và AWS đã nhận cảnh báo thử từ giao diện; chưa xác minh thư đến hộp thư. Cost Explorer chưa bật.
 
 - [Trạng thái triển khai thật](docs/pages-live-status.md): mẫu đã mở, kết quả đo tải và các điều kiện còn thiếu.
 - [Báo cáo tổng hợp](docs/progress.md): phần có mã, kết quả kiểm tra và điểm chặn.

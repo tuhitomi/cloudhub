@@ -135,6 +135,13 @@ class Service(PortalMixin):
                 raise HubError("OPERATION_LOCKED", "Môi trường đang có tác vụ.", 409)
             allowed = {"backup": {"READY"}, "destroy": {"READY", "ERROR_RETAINED", "CREATE_FAILED"},
                        "audit": {"DELETED", "RESIDUAL", "ERROR_RETAINED", "CREATE_FAILED"}}
+            proof=env.get('missing_uncreated_source',{})
+            failed_missing_data=(env['template_id']=='T09' and not env.get('ready_at')
+                and proof.get('type')=='AWS::DynamoDB::Table' and proof.get('id')=='cloudhub-'+eid+'-data'
+                and proof.get('error')=='ResourceNotFoundException'
+                and proof.get('failed_stack_status') in {'CREATE_FAILED','ROLLBACK_COMPLETE','ROLLBACK_FAILED'}
+                and not (env.get('instance_id') or env.get('bucket_name') or env.get('source_ids')))
+            if failed_missing_data:allowed['destroy'].add('RESIDUAL')
             if env["status"] not in allowed[action]:
                 raise HubError("INVALID_STATE", "Trạng thái không cho phép tác vụ này.", 409)
             oid = ident("op-", ipk)
@@ -145,7 +152,7 @@ class Service(PortalMixin):
             if admin_actor:
                 op.update(admin_actor=admin_actor,admin_reason=reason)
             # Failed provisioning with no instance may be cleaned without backing up nonexistent data.
-            if action == "destroy" and env["status"] == "CREATE_FAILED" and not (env.get("instance_id") or env.get("bucket_name") or env.get("source_ids")):
+            if action == "destroy" and (env["status"] == "CREATE_FAILED" or failed_missing_data) and not (env.get("instance_id") or env.get("bucket_name") or env.get("source_ids")):
                 op["phase"], op["recovery_point"] = "DELETE", None
                 rp = None
             env["lock"] = oid

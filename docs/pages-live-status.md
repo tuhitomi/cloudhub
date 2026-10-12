@@ -15,7 +15,7 @@ Tài khoản quản trị `24020341@vnu.edu.vn` vẫn FORCE_CHANGE_PASSWORD; ch�
 - T07: hai vòng độc lập tạo → ghi/đọc → sao lưu → thu hồi nguồn → restore mới → SHA-256 → thu hồi restore, đều PASS. Nguồn/restore DELETED, audit không residual/unknown. Gate đã mở.
 - T09: hai vòng độc lập đã PASS; có dữ liệu, backup/restore, kiểm owner và audit sạch. Gate đã mở. API dữ liệu của môi trường mới chấp nhận scope API Cognito của cùng pool/client; kiểm lại với phương thức đăng nhập mới có minh chứng riêng.
 - T01: hai vòng AWS thật đã PASS: SSH, ghi dữ liệu, AWS Backup, final backup/thu hồi, restore môi trường mới và kiểm checksum. Không mở rộng ingress ngoài /32 của máy triển khai. Một số IP tạm không tới được từ máy kiểm thử; harness ghi rõ các backup/resume làm mới IP, không bỏ qua SSH hoặc mất dữ liệu. Gate được mở sau review hai vòng đầy đủ.
-- T02: CloudFront đã mở quyền, chờ vòng đời thật theo thứ tự T01–T04.
+- T02: vòng đầu đầy đủ đã PASS. Vòng thứ hai bị timeout TCP khi đọc CloudFront; cùng URL sau đó trả HTTP 200 đúng checksum. Đang tiếp tục trên nguồn hiện có bằng fixture mới, giữ lịch sử lỗi, kiểm backup/restore/cleanup đầy đủ trước khi mở gate.
 - T03/T04/T05/T08: có mã và lint/SDK tests; chưa đủ hai vòng AWS thật.
 - T06: đã build source của nhóm trên EC2 tạm, kiểm health, đẩy ECR tag immutable và khóa digest cùng account/region. Ảnh Python Alpine mới scan COMPLETE, không findings. Hai builder đã thu hồi; giữ repo/image để thử Fargate. Chưa mở gate trước hai vòng thật.
 - T10: Redshift Serverless trả SubscriptionRequiredException trong Free Plan. Không tự nâng Paid Plan.
@@ -34,6 +34,6 @@ SNS email quản trị CONFIRMED; AWS nhận cảnh báo thử và trả Message
 
 ## Nguồn và ngân sách
 
-Nguồn/API 0.4.2. Đã đạt 167 Python tests, 14 DOM tests, compile/syntax/OpenAPI/cfn-lint. Kiểm thử localhost chạy với quyền mạng cục bộ sau khi sandbox chặn socket; không bỏ qua test. Đây là local/mock, tách riêng AWS thật.
+Nguồn/API 0.4.2. Đã đạt 171 Python tests, 14 DOM tests, compile/syntax/OpenAPI/cfn-lint. Kiểm thử localhost chạy với quyền mạng cục bộ sau khi sandbox chặn socket; không bỏ qua test. Đây là local/mock, tách riêng AWS thật. Harness có retry mạng tối đa 3 lần, POST giữ nguyên Idempotency-Key/nội dung, ghi tổng latency và số lần thử; không retry HTTP 401/403/429/500 hoặc lỗi chứng chỉ. Benchmark tải không được dùng retry để che lỗi.
 
 Giữ Free Plan, ngân sách 120 USD credits / 0 USD tiền mặt đã duyệt. Credits đầu phiên đọc được 182,95 USD, có độ trễ billing và không phải hard cap. GitHub chỉ gồm file văn bản. Credentials, ảnh, ZIP, dependencies, cấu hình riêng và evidence chi tiết giữ ngoài Git.

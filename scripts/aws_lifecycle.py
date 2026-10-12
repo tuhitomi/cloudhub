@@ -8,11 +8,13 @@ import time
 import uuid
 import urllib.request
 import urllib.error
+import urllib.parse
 import subprocess,tempfile,csv,io
 import re
 from datetime import datetime,timezone
 from pathlib import Path
 from access_token import TokenProvider
+from lifecycle_http import api_call
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -36,13 +38,7 @@ def main():
     evidence={'mode':'AWS_REAL','started_at':datetime.now(timezone.utc).isoformat(),'account_id':identity['Account'],'region':config['region'],
               'template_id':args.template,'cycles':[],'completed_cycles':0,'warnings':['Retained snapshots/S3 copies remain billable until their 7-day policy expires.']}
     def call(path,body=None):
-        headers={'Authorization':'Bearer '+access.get()}
-        if body is not None:headers.update({'Content-Type':'application/json','Idempotency-Key':str(uuid.uuid4())})
-        request=urllib.request.Request(args.api.rstrip('/')+path,headers=headers,data=json.dumps(body).encode() if body is not None else None)
-        start=time.perf_counter()
-        with urllib.request.urlopen(request,timeout=10) as r:
-            payload=json.loads(r.read());status=r.status
-        return payload,{'path':path,'http_status':status,'latency_ms':(time.perf_counter()-start)*1000}
+        return api_call(args.api,path,body,access.get,evidence.setdefault('api_transport_retries',[]))
     def wait(op):
         end=time.monotonic()+7300
         while time.monotonic()<end:
@@ -65,12 +61,23 @@ def main():
             time.sleep(2)
         raise TimeoutError('SSM timeout')
     def read_http(url,auth=False):
-        request=urllib.request.Request(url,headers={'Authorization':'Bearer '+access.get()} if auth else {})
-        with urllib.request.urlopen(request,timeout=15) as response:
-            if response.status!=200:raise RuntimeError('Access failed')
-            data=response.read(65537)
-            if len(data)>65536:raise ValueError('Unexpected response size')
-            return data
+        for attempt in range(1,4):
+            request=urllib.request.Request(url,headers={'Authorization':'Bearer '+access.get()} if auth else {})
+            start=time.perf_counter()
+            try:
+                with urllib.request.urlopen(request,timeout=15) as response:
+                    if response.status!=200:raise RuntimeError('Access failed')
+                    data=response.read(65537)
+                    if len(data)>65536:raise ValueError('Unexpected response size')
+                    return data
+            except (urllib.error.URLError,TimeoutError,ConnectionError) as exc:
+                reason=getattr(exc,'reason',exc)
+                if not isinstance(reason,(TimeoutError,ConnectionError)) or isinstance(exc,urllib.error.HTTPError):raise
+                # GET retries preserve the public URL and TLS checks. Keep timeout
+                # evidence separate from command latency and never mask auth errors.
+                safe=urllib.parse.urlsplit(url)._replace(query='',fragment='').geturl()
+                evidence.setdefault('public_access_retries',[]).append({'url':safe,'attempt':attempt,'error_type':type(reason).__name__,'latency_ms':(time.perf_counter()-start)*1000})
+                if attempt==3:raise
     def ownership_checks(env):
         url=args.api.rstrip('/')+'/environments/'+env['environment_id']
         for credentials,status in [(None,401),(other_access.get(),404)]:

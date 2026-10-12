@@ -34,6 +34,6 @@ SNS email quản trị CONFIRMED; AWS nhận cảnh báo thử và trả Message
 
 ## Nguồn và ngân sách
 
-Nguồn/API 0.4.2. Đã đạt 164 Python tests, 14 DOM tests, compile/syntax/OpenAPI/cfn-lint. Kiểm thử localhost chạy với quyền mạng cục bộ sau khi sandbox chặn socket; không bỏ qua test. Đây là local/mock, tách riêng AWS thật.
+Nguồn/API 0.4.2. Đã đạt 167 Python tests, 14 DOM tests, compile/syntax/OpenAPI/cfn-lint. Kiểm thử localhost chạy với quyền mạng cục bộ sau khi sandbox chặn socket; không bỏ qua test. Đây là local/mock, tách riêng AWS thật.
 
 Giữ Free Plan, ngân sách 120 USD credits / 0 USD tiền mặt đã duyệt. Credits đầu phiên đọc được 182,95 USD, có độ trễ billing và không phải hard cap. GitHub chỉ gồm file văn bản. Credentials, ảnh, ZIP, dependencies, cấu hình riêng và evidence chi tiết giữ ngoài Git.

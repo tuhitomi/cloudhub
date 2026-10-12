@@ -19,7 +19,12 @@ class RDSDriver(StackDriver):
         db=next((r['id'] for r in env['resources'] if r['type']=='AWS::RDS::DBInstance'),None)
         if db:
             env['db_id'],env['data_source']=db,db
-            info=self.rds.describe_db_instances(DBInstanceIdentifier=db)['DBInstances'][0]
+            try:info=self.rds.describe_db_instances(DBInstanceIdentifier=db)['DBInstances'][0]
+            except Exception as exc:
+                if code(exc) not in {'DBInstanceNotFound','DBInstanceNotFoundFault'}:raise
+                # Keep saved source IDs for backup fencing and the final audit.
+                # A CF resource name can precede creation or outlive deletion.
+                return
             secret=info.get('MasterUserSecret',{}).get('SecretArn')
             if secret:
                 self.db(env)

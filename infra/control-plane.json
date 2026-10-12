@@ -1450,6 +1450,41 @@
         }
       }
     },
+    "EnvironmentPolicy2": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "EnvironmentCfRole"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "kms:DescribeKey",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                },
+                "ForAnyValue:StringEquals": {
+                  "kms:ResourceAliases": [
+                    "alias/aws/rds",
+                    "alias/aws/secretsmanager"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "ApiFunction": {
       "Type": "AWS::Serverless::Function",
       "Properties": {

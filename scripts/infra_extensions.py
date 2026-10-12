@@ -61,6 +61,11 @@ def extend(params,r,settings,cf,worker):
         policy(['ecs:CreateCluster','ecs:DeleteCluster','ecs:CreateService','ecs:DeleteService','ecs:UpdateService','ecs:DescribeClusters','ecs:DescribeServices','ecs:RegisterTaskDefinition','ecs:DeregisterTaskDefinition','ecs:DescribeTaskDefinition','ecs:TagResource','ecs:UntagResource','ecs:ListTagsForResource'],condition=region),
         policy(['redshift-serverless:CreateNamespace','redshift-serverless:DeleteNamespace','redshift-serverless:UpdateNamespace','redshift-serverless:GetNamespace','redshift-serverless:CreateWorkgroup','redshift-serverless:DeleteWorkgroup','redshift-serverless:UpdateWorkgroup','redshift-serverless:GetWorkgroup','redshift-serverless:RestoreFromSnapshot','redshift-serverless:GetSnapshot','redshift-serverless:TagResource','redshift-serverless:ListTagsForResource'],condition=region)
     ])
+    # RDS must describe aws/secretsmanager when it manages the master password.
+    # AWS-reserved aliases narrow this metadata-only permission to default keys.
+    cf.append(policy('kms:DescribeKey',arn('kms','key/*'),{
+        'StringEquals':{'aws:RequestedRegion':ref('AWS::Region')},
+        'ForAnyValue:StringEquals':{'kms:ResourceAliases':['alias/aws/rds','alias/aws/secretsmanager']}}))
     worker.extend([
         policy(['rds:DescribeDBInstances','rds:DescribeDBSnapshots','rds:DescribeDBSubnetGroups'],condition=region),
         policy(['rds:CreateDBSnapshot','rds:DeleteDBSnapshot','rds:AddTagsToResource','rds:ListTagsForResource'],[rds_db,rds_snap]),

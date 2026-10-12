@@ -6,7 +6,7 @@ Repository chỉ chứa file văn bản: mã nguồn, cấu hình mẫu, IaC, ki
 
 Nguồn/API **0.4.2** có đăng nhập/refresh trực tiếp qua API Cognito để xử lý Hosted UI timeout, giữ nguyên pool/client, chữ ký JWT và kiểm tra owner/admin. Các chức năng 0.4.0–0.4.1 được giữ: quản trị môi trường/tài khoản/hạn mức, cảnh báo sắp hết hạn, luồng mật khẩu, thử lại/đóng tác vụ lỗi, xóa/export bản sao, lịch sử/bộ lọc và đối soát chi phí tùy chọn. Xem [thay đổi đăng nhập](docs/cognito-api-signin-review.md), [chức năng](docs/product-completion.md) và [bảo vệ dữ liệu](docs/security-fixes.md).
 
-Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diện tiếng Việt, Cognito, HTTP API, Lambda, DynamoDB, Standard Step Functions, Scheduler, CloudFormation và bản sao theo mẫu. D01 đã vận hành lại trên AWS; Pages chuyển người dùng đến URL CloudFront hiện tại. Gate AWS_VERIFIED của từng mẫu nằm ở backend.
+Mã nguồn cho cả T01–T10 theo kiến trúc F00–F08/D01–D13, giao diện tiếng Việt, Cognito, HTTP API, Lambda, DynamoDB, Standard Step Functions, Scheduler, CloudFormation và bản sao theo mẫu. Toàn bộ hệ thống vận hành trên AWS. GitHub chỉ lưu mã nguồn/tài liệu và chạy kiểm tra mã; workflow xuất bản Pages đã được gỡ theo yêu cầu. Gate AWS_VERIFIED của từng mẫu nằm ở backend.
 
 AWS CLI dùng phiên tạm thời được người dùng duyệt, ngân sách 120 USD credits / 0 USD tiền mặt, không nâng Paid Plan. `cloudhub-network` vẫn CREATE_COMPLETE. Dữ liệu retained đã được kiểm kê và tái sử dụng. T07 và T09 đã đạt hai vòng và mở gate; các mẫu còn lại đang kiểm tra riêng. T06 cần image ECR đã quét/review, T10 đang bị Free Plan từ chối Redshift. SNS đã có đăng ký email được xác nhận và AWS đã nhận cảnh báo thử từ giao diện; chưa xác minh thư đến hộp thư. Cost Explorer chưa bật.
 

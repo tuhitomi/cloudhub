@@ -6,7 +6,7 @@ Cập nhật ngày 12/10/2026. Website chính: https://d3qujq9kfq5gca.cloudfront
 
 Domain Hosted UI timeout từ máy triển khai và trình duyệt người dùng. Người dùng đã phê duyệt đăng nhập API Cognito cho app client hiện tại, không cấp thêm IAM/root. Giao diện gửi mật khẩu trực tiếp bằng HTTPS tới Cognito, xử lý mật khẩu lần đầu/MFA và refresh; chỉ token vào sessionStorage. Issuer/audience/chữ ký/access-token, trạng thái tài khoản và owner/admin vẫn được kiểm tra.
 
-Đã kiểm tra hai chủ thể thử thật: đăng nhập thành công, tài khoản thường bị từ chối quản trị HTTP 403. Trình duyệt hiển thị danh mục, hạn mức, môi trường và quản trị từ CloudFront. Sáu file public trả HTTP 200 đúng SHA-256; S3 trực tiếp trả 403. Link Pages cũ chuyển tới website AWS sau lần xuất bản tiếp theo.
+Đã kiểm tra hai chủ thể thử thật: đăng nhập thành công, tài khoản thường bị từ chối quản trị HTTP 403. Trình duyệt hiển thị danh mục, hạn mức, môi trường và quản trị từ CloudFront. Sáu file public trả HTTP 200 đúng SHA-256; S3 trực tiếp trả 403. Theo yêu cầu ngày 12/10, GitHub chỉ giữ mã và kiểm tra mã; workflow xuất bản Pages đã gỡ. Dùng URL CloudFront cho website.
 
 Tài khoản quản trị `24020341@vnu.edu.vn` vẫn FORCE_CHANGE_PASSWORD; chủ tài khoản tự nhập mật khẩu tạm từ thư mời và tự đặt mật khẩu mới. Không có mật khẩu người thật trong repo/báo cáo. Xem [phiếu thay đổi đăng nhập](cognito-api-signin-review.md).
 

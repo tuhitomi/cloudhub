@@ -1,5 +1,5 @@
 """T08 freezes both mounted clients, uses AWS Backup, restores to a new tagged FS."""
-import base64,json,time
+import base64,json,shlex,time
 from .stack_driver import StackDriver
 from .efs_template import efs_template
 from .aws_driver import code
@@ -31,6 +31,25 @@ class EFSDriver(StackDriver):
         for node in self.nodes(env):
             online=self.ssm.describe_instance_information(Filters=[{'Key':'InstanceIds','Values':[node]}])['InstanceInformationList']
             if not online or online[0]['PingStatus']!='Online':return False
+        if op.get('action') in {'create','restore'} and not op.get('efs_bootstrap_done'):
+            # SSM can be online before cloud-init mounts EFS. DNS may become
+            # available after its initial mount loop has ended, especially
+            # during a native restore. Retry the approved filesystem mount.
+            script=('set -eu\n'
+                'test -f /opt/cloudhub/records.py\n'
+                'mountpoint -q /shared || mount -t efs -o tls '+shlex.quote(env['file_system_id']+':/')+' /shared\n'
+                'mountpoint -q /shared\n'
+                'findmnt -n -o OPTIONS /shared | grep -q rw\n'
+                'test ! -L /shared/records\n'
+                'mkdir -p /shared/records\n'
+                "if [ ! -f /shared/records/demo ]; then printf 'CloudHub EFS demo' > /shared/records/demo; fi\n")
+            for node in self.nodes(env):
+                try:result=self.node_command(env,op,node,script,'efs_bootstrap')
+                except HubError as exc:
+                    if exc.code!='DATA_CHECK_FAILED':raise
+                    op.pop('efs_bootstrap_'+node,None);return False
+                if result is None:return False
+            op['efs_bootstrap_done']=True
         if recovery and not op.get('efs_restore_done'):
             if not op.get('efs_restore_job'):
                 response=self.awsbackup.start_restore_job(RecoveryPointArn=recovery['recovery_point_arn'],

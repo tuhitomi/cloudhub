@@ -10,6 +10,8 @@ Thao tác thử lại lần tạo cho T03/T04/T06/T08/T09 dùng chính stack có
 
 AWS thực tế từ chối `UpdateStack` đối với fixture cũ tạo bằng `OnFailure=DO_NOTHING`, dù cách đó cũng giữ tài nguyên khi thất bại. Backend từ chối rõ ràng trường hợp cũ này và giữ nguồn. Quản trị phải bảo vệ filesystem bằng bản sao AWS Backup thật trước khi thu hồi phần tạo dở; vòng thất bại và bản sao vận hành đó không được tính là vòng T08 đạt yêu cầu.
 
+Lần khôi phục thật tiếp theo tạo đúng filesystem và AWS Backup báo COMPLETED, nhưng DNS EFS chưa sẵn sàng khi cloud-init thử mount. SSM đã online trước khi `/shared` được gắn; cloud-init kết thúc vòng chờ trước khi DNS xuất hiện. Bước readiness nay thử mount lại chính filesystem đã kiểm owner, giữ TLS và kiểm cả hai máy trước khi khôi phục/đọc dữ liệu. Không mở thêm cổng hay quyền IAM. Thử lại READINESS giữ cùng restore job và môi trường hiện có.
+
 Kiểm thử local kiểm tra từ chối sai chủ sở hữu, giữ quota và stack cũ, không gửi lại update đang chạy, bảo toàn tài nguyên khi lỗi tiếp và giới hạn IAM. Việc mở gate T08 vẫn yêu cầu hai vòng AWS thật có checksum, backup/restore và cleanup riêng.
 
 Nguồn chính thức: [EFS CreateMountTarget](https://docs.aws.amazon.com/efs/latest/APIReference/API_CreateMountTarget.html), [EFS DeleteMountTarget](https://docs.aws.amazon.com/efs/latest/APIReference/API_DeleteMountTarget.html), [CloudFormation giữ tài nguyên thành công và thử lại](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stack-failure-options.html), [EC2 action/resource/condition](https://docs.aws.amazon.com/service-authorization/latest/reference/list_ec2.html).

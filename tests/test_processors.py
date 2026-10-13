@@ -122,6 +122,7 @@ class ProcessorTests(unittest.TestCase):
         backup=client('backup');stub=Stubber(backup);driver=EFSDriver(S,{'backup':backup})
         env={**ENV,'template_id':'T08','file_system_id':'fs-new12345','node_ids':['i-aaaaaaaaaaaaaaaaa','i-bbbbbbbbbbbbbbbbb']}
         driver.fs=lambda e:{'LifeCycleState':'available'}
+        driver.node_command=lambda *args:''
         driver.clients['ssm']=type('SSM',(),{'describe_instance_information':lambda self,**kw:{'InstanceInformationList':[{'PingStatus':'Online'}]}})()
         arn='arn:aws:backup:ap-southeast-1:123456789012:recovery-point:11111111-1111-1111-1111-111111111111'
         stub.add_response('start_restore_job',{'RestoreJobId':'22222222-2222-2222-2222-222222222222'},
@@ -129,6 +130,24 @@ class ProcessorTests(unittest.TestCase):
              'Metadata':{'file-system-id':env['file_system_id'],'newFileSystem':'false','Encrypted':'true','PerformanceMode':'generalPurpose','CreationToken':OP['operation_id']}})
         with stub:self.assertFalse(driver.ready(env,deepcopy(OP),{'recovery_point_arn':arn}))
         stub.assert_no_pending_responses()
+    def test_efs_restore_waits_for_both_mounts_and_retries_failed_bootstrap(self):
+        driver=EFSDriver(S,{});env={**ENV,'template_id':'T08','file_system_id':'fs-0123456789abcdef0',
+            'node_ids':['i-aaaaaaaaaaaaaaaaa','i-bbbbbbbbbbbbbbbbb']}
+        driver.fs=lambda e:{'LifeCycleState':'available'}
+        driver.clients['ssm']=type('SSM',(),{'describe_instance_information':lambda self,**kw:{'InstanceInformationList':[{'PingStatus':'Online'}]}})()
+        calls=[]
+        def command(e,o,n,s,f):
+            calls.append((n,s,f));o[f+'_'+n]='failed-command'
+            if n==e['node_ids'][1]:raise HubError('DATA_CHECK_FAILED','Mount not ready',409)
+            return ''
+        driver.node_command=command
+        driver.clients['backup']=type('Backup',(),{'start_restore_job':lambda self,**kw:(_ for _ in ()).throw(AssertionError('Restore started before both mounts'))})()
+        op={**OP,'action':'restore'}
+        self.assertFalse(driver.ready(env,op,{'recovery_point_arn':'unused'}))
+        self.assertNotIn('efs_bootstrap_done',op)
+        self.assertNotIn('efs_bootstrap_'+env['node_ids'][1],op)
+        self.assertEqual([n for n,s,f in calls],env['node_ids'])
+        self.assertTrue(all('mount -t efs -o tls fs-0123456789abcdef0:/' in s for n,s,f in calls))
     def test_share_is_owner_only_version_pinned_and_deadline_bounded(self):
         s3=client('s3');stub=Stubber(s3);service=Service(MemoryStore(),clock=lambda:1000)
         env={**ENV,'template_id':'T07','status':'READY','deadline':1060,'lock':None}

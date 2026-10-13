@@ -129,7 +129,7 @@ class PortalMixin:
                 op['previous_error']=op.pop('error',None)
                 # SSM commands are terminal after failure; issue a fresh command.
                 for name in list(op):
-                    if name.endswith('_command') or name.startswith(('warehouse_','efs_ready_','efs_restore_copy_','efs_freeze_','efs_manifest_','efs_write_','efs_read_other_')):op.pop(name)
+                    if name.endswith('_command') or name.startswith(('warehouse_','efs_bootstrap_','efs_ready_','efs_restore_copy_','efs_freeze_','efs_manifest_','efs_write_','efs_read_other_')):op.pop(name)
             self.store.commit(rows,expected(*rows));return self.store.get(op['pk'])
         return retry(commit)
 

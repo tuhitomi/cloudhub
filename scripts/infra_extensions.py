@@ -84,6 +84,11 @@ def extend(params,r,settings,cf,worker):
     # The EFS CloudFormation delete handler checks replication before deleting.
     cf.append(policy('elasticfilesystem:DescribeReplicationConfigurations',
         arn('elasticfilesystem','file-system/*'),region))
+    # Auto Scaling validates RunInstances against the launch-template ARN as
+    # well as the AMI/subnets/instance resources already allowed above.
+    cf.append(policy('ec2:RunInstances',arn('ec2','launch-template/*'),{
+        'StringEquals':{'aws:RequestedRegion':ref('AWS::Region'),'aws:ResourceTag/cloudhub:managed':'true'},
+        'StringLike':{'aws:ResourceTag/cloudhub:environment':'env-*'}}))
     worker.extend([
         policy('cloudformation:UpdateStack',arn('cloudformation','stack/cloudhub-env-*/*')),
         policy(['rds:DescribeDBInstances','rds:DescribeDBSnapshots','rds:DescribeDBSubnetGroups'],condition=region),

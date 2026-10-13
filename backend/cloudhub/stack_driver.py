@@ -78,14 +78,32 @@ class StackDriver(AWSDriver):
             if item['type']=='AWS::Lambda::Permission':item['function_name']=function
             if item['type']=='AWS::AutoScaling::ScalingPolicy':item['group_name']=asg
         if asg:
+            self.scaling_alarms(env,asg)
+        env['source_ids']=[r['id'] for r in env['resources'] if r['type'] in SOURCE_TYPES]
+        self.discover(env)
+        return env['resources']
+    def scaling_alarms(self,env,asg):
+        # CF can expose the physical name before CreateAutoScalingGroup has
+        # completed. DescribePolicies rejects that name instead of returning
+        # an empty page; confirm existence first, preserving read failures.
+        groups=self.autoscaling.describe_auto_scaling_groups(AutoScalingGroupNames=[asg])['AutoScalingGroups']
+        if not groups:return
+        tags={t['Key']:t['Value'] for t in groups[0].get('Tags',[])}
+        if (len(groups)!=1 or groups[0]['AutoScalingGroupName']!=asg
+                or tags.get('cloudhub:environment')!=env['environment_id'] or tags.get('cloudhub:owner')!=env['owner_id']):
+            raise HubError('RESOURCE_SCOPE_MISMATCH','Auto Scaling Group ngoài phạm vi môi trường.',409)
+        try:
             for page in self.autoscaling.get_paginator('describe_policies').paginate(AutoScalingGroupName=asg):
                 for policy in page['ScalingPolicies']:
                     for alarm in policy.get('Alarms',[]):
                         item={'type':'AWS::CloudWatch::Alarm','id':alarm['AlarmName']}
                         if not any(v['type']==item['type'] and v['id']==item['id'] for v in env['resources']):env['resources'].append(item)
-        env['source_ids']=[r['id'] for r in env['resources'] if r['type'] in SOURCE_TYPES]
-        self.discover(env)
-        return env['resources']
+        except Exception as exc:
+            message=getattr(exc,'response',{}).get('Error',{}).get('Message','')
+            if code(exc)!='ValidationError' or message!=f'Group {asg} not found':raise
+            # Handle deletion between the two reads only when a fresh native
+            # lookup confirms absence. Never turn access errors into absence.
+            if self.autoscaling.describe_auto_scaling_groups(AutoScalingGroupNames=[asg])['AutoScalingGroups']:raise
     def apply_outputs(self,env):pass
     def discover(self,env):pass
     def resume(self,env):pass

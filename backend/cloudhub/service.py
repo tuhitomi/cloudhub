@@ -8,6 +8,8 @@ from .catalog import IMPLEMENTED, S3_CONFIG, SCOPES, configuration
 from .cost import Estimator
 from .errors import HubError, Conflict
 from .portal import PortalMixin
+from .lifecycle import LifecycleMixin
+from .operating_policy import validate_policy, legacy_policy, plan
 
 def ident(prefix, *parts):
     return prefix + hashlib.sha256("|".join(parts).encode()).hexdigest()[:24]
@@ -27,15 +29,19 @@ def retry(fn):
             time.sleep(0.002)
     raise HubError("CONCURRENT_UPDATE", "Có yêu cầu đồng thời; hãy thử lại với cùng Idempotency-Key.", 409)
 
-class Service(PortalMixin):
+class Service(LifecycleMixin, PortalMixin):
     def __init__(self, store, clock=time.time, estimator=None, verified=None, validation=None,
-                 user_limit=2, total_limit=4, budget_milliusd=0, workflow_terminal=None):
+                 user_limit=2, total_limit=4, budget_milliusd=0, workflow_terminal=None,price_provider=None):
         self.store, self.clock = store, clock
         self.estimator = estimator or Estimator()
         self.verified = set(verified or []) & IMPLEMENTED
         self.validation = set(validation or []) & IMPLEMENTED
         self.user_limit, self.total_limit, self.budget = user_limit, total_limit, budget_milliusd
         self.workflow_terminal = workflow_terminal
+        self.price_provider=price_provider
+
+    def refresh_pricing(self):
+        if self.price_provider:self.estimator=Estimator(self.price_provider())
 
     def owned(self, kind, entity_id, owner):
         row = self.store.get(kind + "#" + entity_id)
@@ -44,7 +50,8 @@ class Service(PortalMixin):
         return row
 
     def validate_create(self, body, is_admin=False):
-        if set(body) - {"template_id", "duration_hours", "configuration", "recovery_point", "validation_run"}:
+        self.refresh_pricing()
+        if set(body) - {"template_id", "duration_hours", "estimate_hours", "operating_policy", "configuration", "recovery_point", "validation_run"}:
             raise HubError("INVALID_INPUT", "Trường không được phép; owner_id được lấy từ Cognito.")
         tid, hours = body.get("template_id"), body.get("duration_hours")
         if tid not in IMPLEMENTED:
@@ -54,15 +61,27 @@ class Service(PortalMixin):
             raise HubError("INVALID_INPUT", "validation_run phải là boolean.")
         if not (tid in self.verified or validation_run and is_admin and tid in self.validation):
             raise HubError("TEMPLATE_UNVERIFIED", "Mẫu chưa kiểm chứng AWS; chỉ quản trị được chạy vòng kiểm chứng đã duyệt.", 409)
-        if type(hours) is not int or not 1 <= hours <= 8:
-            raise HubError("INVALID_INPUT", "Thời lượng phải là số nguyên từ 1 đến 8 giờ.")
+        if 'operating_policy' in body:
+            if 'duration_hours' in body or 'estimate_hours' not in body:
+                raise HubError('INVALID_INPUT','Dùng khoảng dự toán riêng và chính sách vận hành; không trộn duration_hours cũ.')
+            policy=validate_policy(tid,body['operating_policy'])
+            preview=body['estimate_hours']
+            cost_plan=plan(self.estimator,tid,preview,policy)
+            hours=policy['period_minutes']/60
+        else:
+            if 'estimate_hours' in body or type(hours) is not int or not 1<=hours<=8:
+                raise HubError('INVALID_INPUT','Thời lượng tương thích cũ từ 1 đến 8 giờ.')
+            cost_plan=plan(self.estimator,tid,hours,legacy_policy({'duration_hours':hours}))
+        if cost_plan['operating_policy']['mode']=='AUTO_RENEW' and (cost_plan['operating_policy']['budget_limit_milliusd']>self.budget
+                or cost_plan['approved'] and (cost_plan['total_milliusd']>cost_plan['operating_policy']['budget_limit_milliusd'] or cost_plan['renewal_period']['total_milliusd']<=0)):
+            raise HubError('CUMULATIVE_BUDGET_EXCEEDED','Giới hạn cộng dồn phải đủ kỳ đầu, hữu hạn và nằm trong ngân sách hệ thống.',409)
         config = body.get("configuration", {})
         if not isinstance(config, dict) or config not in ({}, configuration(tid)):
             raise HubError("INVALID_INPUT", "Chỉ hỗ trợ cấu hình chuẩn công bố trong danh mục mẫu.")
-        quote = self.estimator.estimate(tid, hours)
+        quote = {**cost_plan["first_period"], "total_milliusd":cost_plan["total_milliusd"]}
         if not quote["approved"]:
             raise HubError("PRICES_UNAPPROVED", "Cần phê duyệt đơn giá và region trước khi tạo.", 409)
-        return tid, hours, quote
+        return tid, hours, quote, cost_plan
 
     def idempotency(self, owner, key, scope, body):
         if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", key):
@@ -88,7 +107,9 @@ class Service(PortalMixin):
         return user, glob
 
     def create(self, owner, key, body, is_admin=False):
-        tid, hours, quote = self.validate_create(body, is_admin)
+        tid, hours, quote, cost_plan = self.validate_create(body, is_admin)
+        from decimal import Decimal
+        hours=Decimal(cost_plan["operating_policy"]["period_minutes"])/60
         def transaction():
             ipk, fp, old = self.idempotency(owner, key, "create", body)
             if old:
@@ -106,7 +127,13 @@ class Service(PortalMixin):
             env = record("environment", eid, owner, environment_id=eid, template_id=tid,
                 status="PROVISIONING", duration_hours=hours, created_at=now, deadline=None,
                 lock=oid, estimate=quote, resources=[], restore_from=body.get("recovery_point"),
-                validation_run=body.get("validation_run", False), quota_released=False)
+                validation_run=body.get("validation_run", False), quota_released=False,
+                operating_schema=2, operating_policy=cost_plan['operating_policy'], lifecycle_revision=1,
+                schedule_pending=True, estimate_hours=cost_plan['estimate_hours'], cost_plan=cost_plan,
+                first_period_estimate=cost_plan['first_period'], estimated_committed_milliusd=quote['total_milliusd'],
+                retirement_allowance_committed=cost_plan['operating_policy']['ending_policy']=='BACKUP_RETIRE',
+                pause_holding_allowance_committed=cost_plan['operating_policy']['ending_policy']=='PAUSE',
+                renewal_count=0)
             op = record("operation", oid, owner, operation_id=oid, job_id=oid, environment_id=eid,
                 action="restore" if backup else "create", status="QUEUED", phase="CREATE", created_at=now,
                 attempts=0, events=[], recovery_point=body.get("recovery_point"))
@@ -125,61 +152,75 @@ class Service(PortalMixin):
             raise HubError("INVALID_INPUT", "Tác vụ không hợp lệ hoặc có trường không được phép.")
         def transaction():
             env = self.owned("E", eid, owner)
-            ipk, fp, old = self.idempotency(owner, key, eid + "/" + action, {'actor':admin_actor,'reason':reason} if admin_actor else body)
-            if old:
-                return self.owned("O", old["operation_id"], owner)
-            now = int(self.clock())
-            if due and (env["status"] != "READY" or env["deadline"] > now):
-                return None
-            if env.get("lock"):
-                raise HubError("OPERATION_LOCKED", "Môi trường đang có tác vụ.", 409)
-            allowed = {"backup": {"READY"}, "destroy": {"READY", "ERROR_RETAINED", "CREATE_FAILED"},
-                       "audit": {"DELETED", "RESIDUAL", "ERROR_RETAINED", "CREATE_FAILED"}}
-            proof=env.get('missing_uncreated_source',{})
-            failed_missing_data=(env['template_id']=='T09' and not env.get('ready_at')
-                and proof.get('type')=='AWS::DynamoDB::Table' and proof.get('id')=='cloudhub-'+eid+'-data'
-                and proof.get('error')=='ResourceNotFoundException'
-                and proof.get('failed_stack_status') in {'CREATE_FAILED','ROLLBACK_COMPLETE','ROLLBACK_FAILED'}
-                and not (env.get('instance_id') or env.get('bucket_name') or env.get('source_ids')))
-            if failed_missing_data:allowed['destroy'].add('RESIDUAL')
-            if env["status"] not in allowed[action]:
-                raise HubError("INVALID_STATE", "Trạng thái không cho phép tác vụ này.", 409)
-            oid = ident("op-", ipk)
-            rp = ident("rp-", oid) if action in {"backup", "destroy"} else None
-            op = record("operation", oid, owner, operation_id=oid, job_id=oid, environment_id=eid,
-                action=action, status="QUEUED", phase="AUDIT" if action == "audit" else "BACKUP",
-                created_at=now, attempts=0, events=[], recovery_point=rp)
-            if admin_actor:
-                op.update(admin_actor=admin_actor,admin_reason=reason)
-            # Failed provisioning with no instance may be cleaned without backing up nonexistent data.
-            if action == "destroy" and (env["status"] == "CREATE_FAILED" or failed_missing_data) and not (env.get("instance_id") or env.get("bucket_name") or env.get("source_ids")):
-                op["phase"], op["recovery_point"] = "DELETE", None
-                rp = None
-            env["lock"] = oid
-            if due:
-                env["expiry_triggered_at"] = env.get("expiry_triggered_at", now)
-            env["status"] = {"backup": "BACKING_UP", "destroy": "RETIRING", "audit": env["status"]}[action]
-            rows = [env, op, {"pk": ipk, "fingerprint": fp, "operation_id": oid}]
-            if action == "backup":
-                # Extra backups reserve a full session estimate conservatively.
-                quote = self.estimator.estimate(env["template_id"], 1)
-                if not quote["approved"]:
-                    raise HubError("PRICES_UNAPPROVED", "Chưa phê duyệt chi phí bản sao.", 409)
-                user, glob = self.quota(owner, quote["total_milliusd"], 0)
-                counter = self.store.get("B#" + eid) or {"pk": "B#" + eid, "count": 0}
-                if counter["count"] >= 3:
-                    raise HubError("BACKUP_QUOTA", "Tối đa 3 bản sao thủ công cho một môi trường.", 409)
-                counter["count"] += 1
-                rows.extend([user, glob, counter])
-            if rp:
-                rows.append(record("recovery", rp, owner, recovery_point=rp, environment_id=eid,
-                    template_id=env["template_id"], status="PENDING", source=env.get('data_source') or env.get("bucket_name") or env.get("data_volume_id"),
-                    created_at=now, retain_until=now + 7 * 86400,
-                    scope=SCOPES[env['template_id']],
-                    restore_verified=False, retirement_lock=oid if action == 'destroy' else None))
-            self.store.commit(rows, expected(*rows))
-            return self.store.get(op["pk"])
+            return self._enqueue_command(env, owner, eid, action, key, body, due, admin_actor, reason)
         return retry(transaction)
+
+    def _enqueue_command(self, env, owner, eid, action, key, body, due=False, admin_actor=None, reason=None, extra_rows=None,idempotency_scope=None):
+        ipk, fp, old = self.idempotency(owner, key, eid + "/" + (idempotency_scope or action), {'actor':admin_actor,'reason':reason} if admin_actor else body)
+        if old:
+            return self.owned("O", old["operation_id"], owner)
+        now = int(self.clock())
+        if due and (env["status"] != "READY" or env["deadline"] > now):
+            return None
+        if env.get("lock"):
+            raise HubError("OPERATION_LOCKED", "Môi trường đang có tác vụ.", 409)
+        allowed = {"backup": {"READY"}, "destroy": {"READY", "PAUSED", "ERROR_RETAINED", "CREATE_FAILED"},
+                   "audit": {"DELETED", "RESIDUAL", "ERROR_RETAINED", "CREATE_FAILED"}}
+        proof=env.get('missing_uncreated_source',{})
+        failed_missing_data=(env['template_id']=='T09' and not env.get('ready_at')
+            and proof.get('type')=='AWS::DynamoDB::Table' and proof.get('id')=='cloudhub-'+eid+'-data'
+            and proof.get('error')=='ResourceNotFoundException'
+            and proof.get('failed_stack_status') in {'CREATE_FAILED','ROLLBACK_COMPLETE','ROLLBACK_FAILED'}
+            and not (env.get('instance_id') or env.get('bucket_name') or env.get('source_ids')))
+        if failed_missing_data:allowed['destroy'].add('RESIDUAL')
+        if env["status"] not in allowed[action]:
+            raise HubError("INVALID_STATE", "Trạng thái không cho phép tác vụ này.", 409)
+        if action=='destroy' and not env.get('retirement_allowance_committed',True):
+            allowance=self.estimator.holding(env['template_id'],'BACKUP_RETIRE')
+            if not allowance['approved']:raise HubError('PRICES_UNAPPROVED','Cần dự toán bản sao khi thu hồi môi trường đã tạm dừng.',409)
+            extra_rows=list(extra_rows or [])+list(self.quota(owner,allowance['total_milliusd'],0))
+            env['estimated_committed_milliusd']=self._committed(env)+allowance['total_milliusd']
+            env['estimate']['total_milliusd']=env['estimated_committed_milliusd'];env['retirement_allowance_committed']=True
+        oid = ident("op-", ipk)
+        rp = ident("rp-", oid) if action in {"backup", "destroy"} else None
+        op = record("operation", oid, owner, operation_id=oid, job_id=oid, environment_id=eid,
+            action=action, status="QUEUED", phase="AUDIT" if action == "audit" else "BACKUP",
+            created_at=now, attempts=0, events=[], recovery_point=rp)
+        if admin_actor:
+            op.update(admin_actor=admin_actor,admin_reason=reason)
+        # Failed provisioning with no instance may be cleaned without backing up nonexistent data.
+        if action == "destroy" and (env["status"] == "CREATE_FAILED" or failed_missing_data) and not (env.get("instance_id") or env.get("bucket_name") or env.get("source_ids")):
+            op["phase"], op["recovery_point"] = "DELETE", None
+            rp = None
+        if action=="destroy" and env["status"]=="PAUSED":op["phase"]="START_FOR_RETIRE"
+        env["lock"] = oid
+        if due:
+            env["expiry_triggered_at"] = env.get("expiry_triggered_at", now)
+        env["status"] = {"backup": "BACKING_UP", "destroy": "RETIRING", "audit": env["status"]}[action]
+        rows = [env, op, {"pk": ipk, "fingerprint": fp, "operation_id": oid}]+list(extra_rows or [])
+        if due:op.update(auto_termination=True,ending_policy="BACKUP_RETIRE")
+        if action=='destroy':env["lifecycle_revision"]=int(env.get("lifecycle_revision",0))+1
+        if action == "backup":
+            # Extra backups reserve a full session estimate conservatively.
+            quote = self.estimator.estimate(env["template_id"], 1)
+            if not quote["approved"]:
+                raise HubError("PRICES_UNAPPROVED", "Chưa phê duyệt chi phí bản sao.", 409)
+            user, glob = self.quota(owner, quote["total_milliusd"], 0)
+            env['estimated_committed_milliusd']=self._committed(env)+quote['total_milliusd']
+            env['estimate']['total_milliusd']=env['estimated_committed_milliusd']
+            counter = self.store.get("B#" + eid) or {"pk": "B#" + eid, "count": 0}
+            if counter["count"] >= 3:
+                raise HubError("BACKUP_QUOTA", "Tối đa 3 bản sao thủ công cho một môi trường.", 409)
+            counter["count"] += 1
+            rows.extend([user, glob, counter])
+        if rp:
+            rows.append(record("recovery", rp, owner, recovery_point=rp, environment_id=eid,
+                template_id=env["template_id"], status="PENDING", source=env.get('data_source') or env.get("bucket_name") or env.get("data_volume_id"),
+                created_at=now, retain_until=now + 7 * 86400,
+                scope=SCOPES[env['template_id']],
+                restore_verified=False, retirement_lock=oid if action == 'destroy' else None))
+        self.store.commit(rows, expected(*rows))
+        return self.store.get(op["pk"])
 
     def data_command(self, owner, eid, action, key, body):
         if action not in {'put_record','list_records','load_dataset','query_demo'}:
@@ -229,46 +270,9 @@ class Service(PortalMixin):
         return retry(transaction)
 
     def extend(self, owner, eid, key, body):
-        if set(body) != {"hours"} or type(body["hours"]) is not int or not 1 <= body["hours"] <= 4:
-            raise HubError("INVALID_INPUT", "Gia hạn từ 1 đến 4 giờ.")
-        def transaction():
-            env = self.owned("E", eid, owner)
-            ipk, fp, old = self.idempotency(owner, key, eid + "/extend", body)
-            if old:
-                return old["response"]
-            if env["status"] != "READY" or env.get("lock") or env["deadline"] <= int(self.clock()):
-                raise HubError("INVALID_STATE", "Không thể gia hạn phiên đang xử lý hoặc đã hết hạn.", 409)
-            if env["duration_hours"] + body["hours"] > 8:
-                raise HubError("DURATION_LIMIT", "Tổng thời lượng tối đa 8 giờ.")
-            quote = self.estimator.estimate(env["template_id"], body["hours"])
-            if not quote["approved"]:
-                raise HubError("PRICES_UNAPPROVED", "Chưa phê duyệt đơn giá.", 409)
-            user, glob = self.quota(owner, quote["total_milliusd"], 0)
-            env["deadline"] += body["hours"] * 3600
-            env["duration_hours"] += body["hours"]
-            env["schedule_pending"] = True
-            env["estimate"]["total_milliusd"] += quote["total_milliusd"]
-            response = {"environment_id": eid, "deadline": env["deadline"], "schedule_pending": True}
-            rows = [env, user, glob, {"pk": ipk, "fingerprint": fp, "response": response}]
-            self.store.commit(rows, expected(*rows))
-            return response
-        return retry(transaction)
-
-    def expire(self, eid):
-        env = self.store.get("E#" + eid)
-        if not env or env["deadline"] is None or env["deadline"] > int(self.clock()):
-            return None
-        if env["status"] == "BACKING_UP":
-            # Record activation while an existing backup owns the lock. It will hand off
-            # to retirement after resume; activation time differs from deletion time.
-            env["expiry_triggered_at"] = env.get("expiry_triggered_at", int(self.clock()))
-            env["expiry_pending"] = True
-            self.save(env)
-            return None
-        if env["status"] != "READY":
-            return None
-        # Recheck deadline and lock inside the SAME transaction as the retirement command.
-        return self.command(env["owner_id"], eid, "destroy", "expiry_" + str(env["deadline"]), due=True)
+        if set(body)!={'hours'} or type(body['hours']) is not int or not 1<=body['hours']<=4:
+            raise HubError('INVALID_INPUT','Gia hạn tương thích từ 1 đến 4 giờ.')
+        return self.renew(owner,eid,key,{'minutes':body['hours']*60,'confirmed':True})
 
     def save(self, *rows):
         self.store.commit(list(rows), expected(*rows))

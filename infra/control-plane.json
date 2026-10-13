@@ -2101,6 +2101,66 @@
               "Method": "POST",
               "Path": "/admin/signup-defaults"
             }
+          },
+          "PortalRoute19": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/environments/{environment_id}/renewals"
+            }
+          },
+          "PortalRoute20": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/management-estimate"
+            }
+          },
+          "PortalRoute21": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/renew"
+            }
+          },
+          "PortalRoute22": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/change_policy"
+            }
+          },
+          "PortalRoute23": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/resume_paused"
+            }
+          },
+          "PortalRoute24": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/environments/{environment_id}/end"
+            }
           }
         }
       }
@@ -2284,10 +2344,13 @@
               {
                 "Effect": "Allow",
                 "Action": [
-                  "scheduler:CreateSchedule"
+                  "scheduler:CreateSchedule",
+                  "scheduler:GetSchedule",
+                  "scheduler:UpdateSchedule",
+                  "scheduler:DeleteSchedule"
                 ],
                 "Resource": {
-                  "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*"
+                  "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/env-*"
                 }
               },
               {
@@ -3036,10 +3099,13 @@
               {
                 "Effect": "Allow",
                 "Action": [
-                  "scheduler:CreateSchedule"
+                  "scheduler:CreateSchedule",
+                  "scheduler:GetSchedule",
+                  "scheduler:UpdateSchedule",
+                  "scheduler:DeleteSchedule"
                 ],
                 "Resource": {
-                  "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*"
+                  "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/env-*"
                 }
               },
               {

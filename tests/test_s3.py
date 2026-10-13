@@ -132,6 +132,7 @@ class S3Tests(unittest.TestCase):
         self.driver=S3Driver(SETTINGS,clients={'s3':self.s3,'cloudformation':self.cf,'cloudfront':FakeCloudFront(self.cf),'scheduler':object()},clock=lambda:self.now,
             http_get=lambda url:(200,self.s3.buckets[self.current_bucket]['files']['.cloudhub/ready.txt'][-1]['data'] if '.cloudhub/ready.txt' in url else b'html'))
         self.driver.schedule=lambda env:None
+        self.driver.cancel_schedule=lambda env:None
         self.w=Worker(self.s,self.driver)
     def run_op(self,op):
         for _ in range(200):

@@ -19,6 +19,14 @@ def route(service, method, path, body, key, owner, admin, claims, query, public)
     if method=='GET' and path=='/notifications':return service.notifications(owner),200
     if method=='GET' and path=='/operations':
         return {'items':[public(o) for o in sorted(service.store.list_owner(owner,'operation'),key=lambda o:o.get('created_at',0),reverse=True)[:100]]},200
+    if method=='GET' and re.fullmatch(r'/environments/[a-z0-9-]+/renewals',path):
+        history=service.renewal_history(owner,path.split('/')[2]);history['items']=[public(row) for row in history['items']]
+        return history,200
+    if method=='POST' and re.fullmatch(r'/environments/[a-z0-9-]+/management-estimate',path):
+        return service.management_estimate(owner,path.split('/')[2],body),200
+    if method=='POST' and re.fullmatch(r'/environments/[a-z0-9-]+/(renew|change_policy|resume_paused|end)',path):
+        _,eid,action=path.strip('/').split('/')
+        return public(getattr(service,action)(owner,eid,key,body)),202
     if method=='POST' and re.fullmatch(r'/operations/[a-z0-9-]+/(retry|cancel)',path):
         _,oid,action=path.strip('/').split('/')
         return public(service.control_operation(owner,oid,action,key,body)),202 if action=='retry' else 200

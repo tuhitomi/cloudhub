@@ -46,5 +46,7 @@ def catalog(verified=None):
              "create_enabled": code in verified and code in IMPLEMENTED,
              "configuration": configuration(code) if code in IMPLEMENTED else {},
              'backup_scope':SCOPES[code],
+             'operating_capabilities':{'modes':['AUTO_OFF','AUTO_RENEW'],'ending_policies':['PAUSE','BACKUP_RETIRE'] if code in {'T01','T05'} else ['BACKUP_RETIRE'],
+                 'supports_pause':code in {'T01','T05'},'period_minutes_min':5,'period_minutes_max':480},
              "operations": ["create", "backup", "restore", "destroy", "audit"] if code in IMPLEMENTED else []}
             for code, name, purpose, services in NAMES]

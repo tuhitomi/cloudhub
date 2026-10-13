@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch,Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 from cloudhub.service import Service
 from cloudhub.store import MemoryStore
@@ -107,7 +107,11 @@ class PortalTests(unittest.TestCase):
     def test_reminder_does_not_break_pending_schedule_version(self):
         from cloudhub import runtime
         env=self.ready();self.now=env['deadline']-600;env['schedule_pending']=True;self.s.save(env)
-        with patch.object(runtime,'build_service',return_value=self.s),patch.object(runtime,'build_driver',return_value=self.driver):runtime.sweep_handler({})
+        provider=Mock();provider.describe_execution.return_value={'status':'RUNNING'}
+        with patch.object(runtime,'build_service',return_value=self.s),patch.object(runtime,'build_driver',return_value=self.driver),patch.object(runtime,'dispatch'),patch('boto3.client',return_value=provider),patch.dict('os.environ',{'STATE_MACHINE_ARN':'arn:aws:states:us-east-1:123456789012:stateMachine:test'}):runtime.sweep_handler({})
+        repair=self.store.get('O#'+self.store.get(env['pk'])['lock'])
+        self.assertEqual(repair['phase'],'SYNC_SCHEDULE');self.assertTrue(self.store.get(env['pk'])['schedule_pending'])
+        self.worker.tick(repair['operation_id'])
         self.assertFalse(self.store.get(env['pk'])['schedule_pending'])
     def test_cancel_failed_task_never_deletes_or_releases_source(self):
         env,op=self.failed_backup();quota=deepcopy(self.store.get('Q#alice'))

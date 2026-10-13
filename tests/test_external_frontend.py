@@ -81,7 +81,7 @@ class ExternalFrontendTests(unittest.TestCase):
     def test_live_artifact_is_text_only_and_refuses_mixed_output(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            self.assertEqual(build(target, self.config()), ['.nojekyll', 'app.js', 'auth.js', 'config.js', 'index.html', 'portal.js', 'style.css'])
+            self.assertEqual(build(target, self.config()), ['.nojekyll', 'app.js', 'auth.js', 'config.js', 'index.html', 'lifecycle.js', 'portal.js', 'style.css'])
             self.assertIn('href="./"', (target / 'index.html').read_text(encoding='utf-8'))
             self.assertIn("import {createPortal}", (target / 'app.js').read_text(encoding='utf-8'))
             for path in target.iterdir():

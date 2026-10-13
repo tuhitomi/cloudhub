@@ -4,7 +4,8 @@ from .errors import HubError
 
 RETRY_PHASES = {'READINESS', 'SCHEDULE', 'BACKUP', 'RESUME', 'WAIT_RESUME',
                 'DELETE', 'AUDIT', 'WRITE_FILE', 'USE_DATA', 'DELETE_BACKUP',
-                'EXPORT_BACKUP', 'COST'}
+                'EXPORT_BACKUP', 'COST','SYNC_SCHEDULE','PAUSE','PAUSE_AUDIT','CANCEL_SCHEDULE',
+                'START_RESTART','WAIT_RESTART','START_FOR_RETIRE','WAIT_RETIRE_READY'}
 
 class PortalMixin:
     def limits(self, owner):
@@ -36,12 +37,22 @@ class PortalMixin:
 
     def notifications(self, owner):
         now=int(self.clock()); items=[]
+        for saved in self.store.list_owner(owner,'notification'):
+            if saved.get('type')=='RENEWAL_BLOCKED':
+                items.append({'notification_id':saved['notification_id'],'environment_id':saved['environment_id'],
+                    'type':saved['type'],'code':saved['code'],'message':saved['message'],
+                    'ending_policy':saved['ending_policy'],'created_at':saved['created_at'],'remaining_seconds':0})
         for env in self.store.list_owner(owner,'environment'):
             if env['status'] in {'READY','BACKING_UP'} and env.get('deadline') and 0 < int(env['deadline'])-now <= 900:
+                from .operating_policy import current_policy
+                policy=current_policy(env)
+                ending='tạm dừng và giữ dữ liệu' if policy['ending_policy']=='PAUSE' else 'sao lưu rồi thu hồi'
+                message=('Sắp đến mốc kiểm tra gia hạn. Nếu không đủ điều kiện, hệ thống sẽ '+ending+'.'
+                         if policy['mode']=='AUTO_RENEW' else 'Sắp đến mốc tự động '+ending+'.')
                 items.append({'notification_id':env['environment_id']+'-'+str(env['deadline']),
                     'environment_id':env['environment_id'],'deadline':int(env['deadline']),
                     'remaining_seconds':int(env['deadline'])-now,'type':'EXPIRY_SOON',
-                    'message':'Môi trường sắp hết hạn. Gia hạn hoặc lưu dữ liệu trước khi hệ thống sao lưu và thu hồi.'})
+                    'message':message})
         return {'items':items,'warning_minutes':15}
 
     def remind(self, eid):
@@ -57,7 +68,7 @@ class PortalMixin:
             self.store.commit([env,item],expected(env,item));return item
         return retry(commit)
 
-    def control_operation(self, owner, oid, action, key, body):
+    def control_operation(self, owner, oid, action, key, body,automatic=False):
         from .service import retry, expected, record, ident
         if body or action not in {'retry','cancel'}:
             raise HubError('INVALID_INPUT','Thao tác tác vụ không hợp lệ.')
@@ -81,7 +92,7 @@ class PortalMixin:
                         and env['template_id'] in {'T03','T04','T06','T08','T09'})
                 if construction_retry:
                     phase='CREATE'
-                if (phase not in RETRY_PHASES and not construction_retry) or op.get('manual_retries',0)>=3:
+                if (phase not in RETRY_PHASES and not construction_retry) or (op.get('automatic_retries',0)>=2 if automatic else op.get('manual_retries',0)>=3):
                     raise HubError('RETRY_UNAVAILABLE','Không thể thử lại bước này. Kiểm tra/thu hồi nguồn trước khi tạo mới, hoặc đã đạt 3 lần thử.',409)
                 rp=self.store.get('R#'+op['recovery_point']) if op.get('recovery_point') else None
                 if op['action'] in {'delete_backup','export_backup'}:
@@ -119,12 +130,15 @@ class PortalMixin:
                     quote=self.estimator.estimate(env['template_id'],1)
                     if not quote['approved']:raise HubError('PRICES_UNAPPROVED','Chưa phê duyệt dự toán bản sao.',409)
                     rows.extend(self.quota(owner,quote['total_milliusd'],0))
+                    env['estimated_committed_milliusd']=self._committed(env)+quote['total_milliusd']
+                    env['estimate']['total_milliusd']=env['estimated_committed_milliusd']
                     rid=ident('rp-',oid,'retry',str(op.get('generation',0)+1));now=int(self.clock())
                     fresh=record('recovery',rid,owner,recovery_point=rid,environment_id=env['environment_id'],template_id=env['template_id'],status='PENDING',source=env.get('data_source') or env.get('bucket_name') or env.get('data_volume_id'),created_at=now,retain_until=now+7*86400,scope=SCOPES[env['template_id']],restore_verified=False,retry_of=op.get('recovery_point'),retirement_lock=oid if op['action']=='destroy' else None)
                     rows.append(fresh);op['recovery_point']=rid
                     for name in ['backup_job_id','backup_cursor','backup_verify_cursor']:op.pop(name,None)
                 op['phase']=phase;op['status']='QUEUED';op['attempts']=0
-                op['manual_retries']=op.get('manual_retries',0)+1
+                if automatic:op['automatic_retries']=op.get('automatic_retries',0)+1
+                else:op['manual_retries']=op.get('manual_retries',0)+1
                 op['generation']=op.get('generation',0)+1
                 op['previous_error']=op.pop('error',None)
                 # SSM commands are terminal after failure; issue a fresh command.

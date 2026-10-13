@@ -36,7 +36,10 @@ def extend(params, resources, common, policy, ref, sub, att):
         ('GET','/admin/environments'),('GET','/admin/operations/{operation_id}'),
         ('GET','/admin/users'),('POST','/admin/users'),('POST','/admin/users/{owner_id}/{control}'),
         ('POST','/admin/environments/{environment_id}/retire'),('GET','/admin/notifications'),('POST','/admin/notifications/test'),
-        ('GET','/account'),('GET','/admin/signup-defaults'),('POST','/admin/signup-defaults')]
+        ('GET','/account'),('GET','/admin/signup-defaults'),('POST','/admin/signup-defaults'),
+        ('GET','/environments/{environment_id}/renewals'),('POST','/environments/{environment_id}/management-estimate'),
+        ('POST','/environments/{environment_id}/renew'),('POST','/environments/{environment_id}/change_policy'),
+        ('POST','/environments/{environment_id}/resume_paused'),('POST','/environments/{environment_id}/end')]
     for index,(method,path) in enumerate(routes):
         events['PortalRoute'+str(index)]={'Type':'HttpApi','Properties':{'ApiId':ref('HttpApi'),'Method':method,'Path':path}}
     return {'HasAlertEmail':{'Fn::Not':[{'Fn::Equals':[ref('AlertEmail'),'']}]},'CostsEnabled':{'Fn::Equals':[ref('ActualCostsEnabled'),'true']}}

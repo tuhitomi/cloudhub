@@ -21,6 +21,8 @@ class Worker:
             return {"operation_id": oid, "done": True, "failed": op["status"] == "FAILED"}
         if op['action'] in {'delete_backup','export_backup','cost'}:
             return self.product_tick(op)
+        if op['action'] in {'renew','change_policy','resume_paused','pause'}:
+            return self.lifecycle_tick(op)
         env = s.store.get("E#" + op["environment_id"])
         if env.get("lock") != oid:
             raise HubError("LOCK_LOST", "Khóa tác vụ đã thay đổi.", 409)
@@ -57,7 +59,8 @@ class Worker:
                     op["phase"] = "SCHEDULE"
                     # Session begins ONLY when data readiness succeeds.
                     env["ready_at"] = int(s.clock())
-                    env["deadline"] = env["ready_at"] + env["duration_hours"] * 3600
+                    from .operating_policy import current_policy
+                    env["deadline"] = env["ready_at"] + current_policy(env)['period_minutes'] * 60
             elif op["phase"] == "SCHEDULE":
                 self.driver.schedule(env)
                 env["status"], env["schedule_pending"] = "READY", False
@@ -72,6 +75,10 @@ class Worker:
                     op["phase"] = "DELETE" if op["action"] == "destroy" else "RESUME"
                 s.save(op, env, rp)
                 return {"operation_id": oid, "done": False, "failed": False}
+            elif op['phase']=='START_FOR_RETIRE':
+                self.driver.resume(env);op['phase']='WAIT_RETIRE_READY'
+            elif op['phase']=='WAIT_RETIRE_READY':
+                if self.driver.ready(env,op,None):op['phase']='BACKUP'
             elif op["phase"] == "RESUME":
                 self.driver.resume(env)
                 # Check SSM/EC2 again after an intentional backup outage.
@@ -104,6 +111,8 @@ class Worker:
                 env["status"] = "RESIDUAL" if report["residual"] or report["unknown"] else "DELETED"
                 if env['status']=='DELETED':env['retired_at']=env.get('retired_at',int(s.clock()))
                 env["needs_admin"] = env["status"] == "RESIDUAL"
+                if not env['needs_admin']:
+                    self.driver.cancel_schedule(env)
                 residual = env['needs_admin']
                 if residual:
                     op['error'] = 'CLEANUP_RESIDUAL: còn tài nguyên dư hoặc chưa xác minh được; giữ hạn mức và bản sao.'
@@ -126,6 +135,54 @@ class Worker:
             s.save(op, env)
             return self.fail(oid, op["error"])
         return {"operation_id": oid, "done": False, "failed": False}
+
+    def lifecycle_tick(self,op):
+        from .operating_policy import current_policy,revision
+        s=self.service;env=s.store.get('E#'+op['environment_id']);oid=op['operation_id']
+        if env.get('lock')!=oid:raise HubError('LOCK_LOST','Khóa tác vụ đã đổi.',409)
+        op.update(status='RUNNING',attempts=op['attempts']+1)
+        if op['attempts']>180:return self.fail(oid,'OPERATION_TIMEOUT: exceeded 180 polls')
+        try:
+            phase=op['phase']
+            if phase=='SYNC_SCHEDULE':
+                if op['target_revision']!=revision(env):
+                    op['superseded']=True;s.finish(op,env)
+                    return {'operation_id':oid,'done':True,'failed':False}
+                if env['status']=='PAUSED':self.driver.cancel_schedule(env);synced=True
+                elif env['deadline']>int(s.clock()):self.driver.schedule(env);synced=True
+                else:synced=False # Process an already due deadline directly instead of creating a past schedule.
+                env.update(schedule_pending=False,needs_admin=False)
+                op['result']={'schedule_synced':synced,'deadline':env.get('deadline'),'lifecycle_revision':revision(env)}
+                s.finish(op,env);next_op=s.expire(env['environment_id'])
+                return {'operation_id':oid,'done':True,'failed':False,'expiry_operation_id':next_op['operation_id'] if next_op else None}
+            if phase=='PAUSE':
+                if self.driver.pause(env):op['phase']='PAUSE_AUDIT'
+            elif phase=='PAUSE_AUDIT':
+                backups=[r for r in s.store.scan_kind('recovery') if r['environment_id']==env['environment_id']]
+                report=self.driver.pause_audit(env,backups);report['checked_at']=int(s.clock())
+                report['holding_estimate']=s.estimator.holding(env['template_id'],'PAUSE')
+                env.update(status='PAUSED',pause_report=report,paused_at=int(s.clock()))
+                op['pause_residual']=bool(report['residual'] or report['unknown']);op['phase']='CANCEL_SCHEDULE'
+            elif phase=='CANCEL_SCHEDULE':
+                self.driver.cancel_schedule(env);env.update(schedule_pending=False,needs_admin=op.get('pause_residual',False))
+                if op.get('pause_residual'):op['error']='PAUSE_RESIDUAL: nguồn tạm dừng nhưng còn tài nguyên chưa xác minh.'
+                op['result']={'status':'PAUSED','quota_released':False,'pause_report':env['pause_report']}
+                s.finish(op,env,'FAILED' if op.get('pause_residual') else 'SUCCEEDED')
+                if op.get('pause_residual'):log.error('CloudHub pause residual environment=%s',env['environment_id'])
+                return {'operation_id':oid,'done':True,'failed':bool(op.get('pause_residual'))}
+            elif phase=='START_RESTART':
+                self.driver.resume(env);op['phase']='WAIT_RESTART'
+            elif phase=='WAIT_RESTART':
+                if self.driver.ready(env,op,None):
+                    env.update(status='READY',deadline=int(s.clock())+current_policy(env)['period_minutes']*60)
+                    op['phase']='SYNC_SCHEDULE';env['schedule_sync_operation_id']=oid
+            else:raise HubError('INVALID_PHASE','Pha quản lý vận hành không hợp lệ.',409)
+            if phase!=op['phase']:op['events']=(op['events']+[{'phase':op['phase'],'at':int(s.clock())}])[-30:]
+            s.save(op,env)
+        except Conflict:raise
+        except HubError as error:
+            op['error']=error.code+': '+error.message;s.save(op,env);return self.fail(oid,op['error'])
+        return {'operation_id':oid,'done':False,'failed':False}
 
     def product_tick(self, op):
         s=self.service;env=s.store.get('E#'+op['environment_id'])
@@ -172,6 +229,16 @@ class Worker:
         env = s.store.get("E#" + op["environment_id"])
         op["error"] = str(error)[:1500]
         op['failed_phase']=op['phase']
+        if op['phase']=='SYNC_SCHEDULE' and op['action'] in {'renew','change_policy','resume_paused'}:
+            env.update(schedule_pending=True,needs_admin=True,schedule_sync_operation_id=oid)
+            s.finish(op,env,'FAILED')
+            print(json.dumps({'event':'CloudHubOperationFailed','operation_id':oid,'environment_id':env['environment_id'],
+                'error':op['error'],'source_preserved':True,'deadline_preserved':env['deadline']}))
+            return {'operation_id':oid,'done':True,'failed':True}
+        if op['action']=='pause' and env.get('status')=='PAUSED':
+            env['needs_admin']=True;s.finish(op,env,'FAILED')
+            print(json.dumps({'event':'CloudHubOperationFailed','operation_id':oid,'environment_id':env['environment_id'],'error':op['error'],'source_preserved':True}))
+            return {'operation_id':oid,'done':True,'failed':True}
         if op['action'] in {'delete_backup','export_backup','cost'}:
             rows=[op]
             if op['action']=='cost':

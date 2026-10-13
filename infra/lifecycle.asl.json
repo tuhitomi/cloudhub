@@ -1,5 +1,5 @@
 {
-  "Comment": "Bounded poll transitions; errors preserve source data",
+  "Comment": "Bounded create/backup/retire, pause/restart and shared lifecycle schedule-sync operations; renewal decisions atomically update metadata and never recreate infrastructure; errors preserve source data",
   "StartAt": "Tick",
   "TimeoutSeconds": 7200,
   "States": {

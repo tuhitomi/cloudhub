@@ -1,5 +1,7 @@
 # CloudHub
 
+CloudHub giúp người chưa biết AWS chọn nhu cầu, dùng cấu hình chuẩn, chọn chế độ vận hành, xem dự toán rồi tạo và quản lý hạ tầng. **Nguồn/API 0.5.0** tách kỳ dự toán khỏi thời hạn, có tự động gia hạn theo ngân sách cộng dồn hoặc tự động tắt theo chính sách tạm dừng hoặc sao lưu rồi thu hồi. Đọc [hai chế độ, chuyển đổi dữ liệu và kiểm chứng](docs/operating-modes.md). Môi trường cũ không tự bật gia hạn; các vòng kiểm chứng hạ tầng trước đây không thay thế kiểm chứng các chế độ mới.
+
 Repository chỉ chứa file văn bản: mã nguồn, cấu hình mẫu, IaC, kiểm thử và tài liệu. Ảnh minh chứng, file nén, dependencies, credentials và cấu hình triển khai riêng được giữ ngoài Git. Một số đường dẫn minh chứng trong báo cáo cũ chỉ có ở workspace gốc.
 
 **Website AWS:** [CloudHub](https://d3qujq9kfq5gca.cloudfront.net/) đã trở lại kế hoạch gốc: S3 riêng tư + CloudFront/OAC, Cognito, HTTP API và xử lý tài nguyên tại ap-southeast-1, stack `cloudhub-pages-live` UPDATE_COMPLETE. AWS Support xác nhận tài khoản được duyệt ngày 12/10/2026. Đăng nhập API Cognito đã được người dùng phê duyệt và kiểm tra qua website thật; danh mục, hạn mức và quản trị hoạt động. Mẫu chỉ mở sau hai vòng đời AWS đạt yêu cầu; chưa nghiệm thu toàn bộ 10 mẫu và SLA.

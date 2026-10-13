@@ -19,6 +19,7 @@ class S3SDKTests(unittest.TestCase):
     def setUp(self):
         self.client=boto3.client('s3',region_name='us-east-1',aws_access_key_id='testing',aws_secret_access_key='testing')
         self.driver=S3Driver(SETTINGS,clients={'s3':self.client,'cloudformation':object(),'cloudfront':object(),'scheduler':object()})
+        self.driver.cancel_schedule=lambda env:None
         self.env={'environment_id':'env-'+'a'*24,'owner_id':'alice','template_id':'T02'}
         self.bucket=bucket_name(self.env,SETTINGS);self.account=SETTINGS['account_id']
         self.tags={'TagSet':[{'Key':k,'Value':v} for k,v in {'cloudhub:environment':self.env['environment_id'],'cloudhub:owner':'alice','cloudhub:managed':'true'}.items()]}

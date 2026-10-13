@@ -22,7 +22,7 @@ class DriverRouter:
         return self.drivers[kind]
 
     def __getattr__(self, name):
-        if name not in {"create", "created", "ready", "schedule", "backup", "resume", "delete", "inventory", "audit", "expire_backup", "write_file",'use_data'}:
+        if name not in {"create", "created", "ready", "schedule", "cancel_schedule", "pause", "pause_audit", "backup", "resume", "delete", "inventory", "audit", "expire_backup", "write_file",'use_data'}:
             raise AttributeError(name)
         return lambda row, *args: getattr(self.driver(row), name)(row, *args)
 

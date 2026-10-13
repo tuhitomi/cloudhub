@@ -163,7 +163,7 @@ def build_template(frontend_url=None, existing_data=None):
         policy("ssm:GetParameter", sub("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ec2/keypair/*")),
         policy("ssm:SendCommand", sub("arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript")),
         policy("ssm:SendCommand", sub("arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"), {"StringEquals": {"ssm:resourceTag/cloudhub:managed": "true"}}),
-        policy(["scheduler:CreateSchedule"], sub("arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*")),
+        policy(["scheduler:CreateSchedule","scheduler:GetSchedule","scheduler:UpdateSchedule","scheduler:DeleteSchedule"], sub("arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/env-*")),
         policy("backup:StartBackupJob", att("BackupVault", "BackupVaultArn")),
         policy(["backup:DescribeBackupJob", "backup:DeleteRecoveryPoint", 'backup:DescribeRecoveryPoint',
                 'backup:ListRecoveryPointsByBackupVault', 'backup:ListTags'], "*", region_cond),

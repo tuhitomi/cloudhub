@@ -1,0 +1,100 @@
+{
+  "verification_mode": "AWS_REAL",
+  "source_version": "0.5.0",
+  "account_id": "133130236086",
+  "region": "ap-southeast-1",
+  "started_at": "2026-10-13T10:18:32.954776+00:00",
+  "finished_at": "2026-10-13T11:01:37.658043+00:00",
+  "result": "PASS",
+  "local_checks": {
+    "python_distinct_tests": 223,
+    "DOM_tests": 31,
+    "openapi_schema": "PASS",
+    "CloudFormation_lint": "PASS"
+  },
+  "fixture": {
+    "environment_id": "env-53cf07dc51a4f069383a8dce",
+    "template_id": "T05",
+    "estimate_hours": 8,
+    "period_minutes": 5,
+    "initial_mode": "AUTO_RENEW",
+    "confirmed_ending": "PAUSE",
+    "first_commitment_milliusd": 454,
+    "cumulative_cap_milliusd": 805,
+    "final_commitment_milliusd": 1267,
+    "gross_estimate_not_invoice": true
+  },
+  "checks": {
+    "ordinary_profile_and_verified_email": true,
+    "duplicate_create_same_operation": true,
+    "cross_owner_get_history_renew_denied": true,
+    "forecast_eight_hours_operating_five_minutes": true,
+    "automatic_renewal_same_resources_data": true,
+    "old_callback_after_renewal_ignored": true,
+    "cumulative_cap_then_pause_retains_volumes_and_quota": true,
+    "mode_change_keeps_cumulative_commitment": true,
+    "resume_same_instance_volumes_data_duplicate_idempotent": true,
+    "mandatory_backup_before_retirement_clean_audit_quota_released": true
+  },
+  "resource_identity": {
+    "instance": "i-07159956f43182549",
+    "volumes": [
+      "vol-011df95ccc812fbc8",
+      "vol-0c3113e4270ccfb3c"
+    ],
+    "same_after_renewal": true,
+    "same_after_resume": true
+  },
+  "data": {
+    "before": "a8448368c8e06f6514c1de7a08b84c1915f3ef81f50af7adfaf36fca5bc2deaf",
+    "after_renewal": "a8448368c8e06f6514c1de7a08b84c1915f3ef81f50af7adfaf36fca5bc2deaf",
+    "after_resume": "a8448368c8e06f6514c1de7a08b84c1915f3ef81f50af7adfaf36fca5bc2deaf"
+  },
+  "scheduler": {
+    "initial_deadline": 1791887281,
+    "renewed_deadline": 1791887597,
+    "stale_callback_replay": "Actual Expiry Lambda replay; ignored. This replay is not a natural Scheduler delivery.",
+    "natural_deadlines": true,
+    "no_clock_or_deadline_overwrite": true,
+    "delivery_source_observability": "Observed natural expiry decisions and real schedule configuration; did not independently attribute every invocation to Scheduler vs fallback."
+  },
+  "cleanup": {
+    "source_status": "DELETED",
+    "deleted_count": 7,
+    "retained": [
+      {
+        "id": "snap-0d0393449971b3daf",
+        "retain_until": 1792493624,
+        "type": "AWS::EC2::Snapshot"
+      }
+    ],
+    "residual": [],
+    "unknown": [],
+    "active_quota_returned": true,
+    "estimated_budget_not_refunded": true,
+    "final_backup_status": "AVAILABLE",
+    "final_backup_restore_tested": false,
+    "synthetic_users_disabled": true,
+    "human_accounts_changed": false,
+    "private_credentials_file_removed": true
+  },
+  "deployment": {
+    "status": "UPDATE_COMPLETE",
+    "assets_verified": 7,
+    "direct_s3_http_status": 403,
+    "verified_templates": "T01,T02,T03,T04,T05,T06,T07,T08,T09",
+    "lambda_concurrency": 10,
+    "plan_type": "FREE"
+  },
+  "corrected_failures": {
+    "harness_json_comparison": true,
+    "stored_Decimal_management_quote": true,
+    "source_deleted_before_mandatory_backup": false
+  },
+  "limits": [
+    "Only one T05 environment verified for new modes, not all nine mode/template combinations.",
+    "Backup failure, quota denial, near-deadline races and forced schedule SDK failure verified locally with mocks, not injected into AWS.",
+    "Final native backup AVAILABLE; restore of this final point not rerun.",
+    "Retained snapshot/log/shared platform continue possible charges; no Cost Explorer invoice reconciliation or SLA claim."
+  ]
+}

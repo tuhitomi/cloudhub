@@ -1,4 +1,5 @@
 import {createPortal} from './portal.js';
+import {createLifecycleUI,operatingPolicy,modeName,endingName} from './lifecycle.js';
 import {createCognitoAuth,createRegistration,refreshCognito,cognitoRequest} from './auth.js';
 const $ = s => document.querySelector(s);
 const cfg = window.CLOUDHUB || {};
@@ -10,7 +11,7 @@ const commands = new Map(), operations = new Map();
 let fileEnvironment, recordEnvironment;
 let cachedEnvironments=[];
 const catalogCache=new Map();
-const stateNames = {READY:'Sẵn sàng',PROVISIONING:'Đang triển khai',BACKING_UP:'Đang sao lưu',RETIRING:'Đang thu hồi',DELETED:'Đã thu hồi/xóa',DELETING:'Đang xóa bản sao',DELETE_FAILED:'Xóa chưa hoàn tất',RESIDUAL:'Còn tài nguyên cần xử lý',ERROR_RETAINED:'Có lỗi · Đang giữ dữ liệu',CREATE_FAILED:'Triển khai thất bại',AVAILABLE:'Có thể khôi phục',PENDING:'Đang xử lý',FAILED:'Thất bại',EXPIRED:'Đã hết hạn',EXPIRING:'Đang xóa theo chính sách'};
+const stateNames = {PAUSED:'Đã tạm dừng',PAUSING:'Đang tạm dừng',RESTARTING:'Đang mở lại',READY:'Sẵn sàng',PROVISIONING:'Đang triển khai',BACKING_UP:'Đang sao lưu',RETIRING:'Đang thu hồi',DELETED:'Đã thu hồi/xóa',DELETING:'Đang xóa bản sao',DELETE_FAILED:'Xóa chưa hoàn tất',RESIDUAL:'Còn tài nguyên cần xử lý',ERROR_RETAINED:'Có lỗi · Đang giữ dữ liệu',CREATE_FAILED:'Triển khai thất bại',AVAILABLE:'Có thể khôi phục',PENDING:'Đang xử lý',FAILED:'Thất bại',EXPIRED:'Đã hết hạn',EXPIRING:'Đang xóa theo chính sách'};
 function element(tag, text, className){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;}
 function notice(text){$('#notice').textContent=text;}
 function timestamp(sec){return sec?new Date(Number(sec)*1000).toLocaleString('vi-VN',{timeZone:'Asia/Bangkok'}):'Chưa bắt đầu';}
@@ -30,10 +31,10 @@ T03:'Web và PostgreSQL · 32 bản ghi minh họa, mỗi bản ghi 256 byte',T0
 T05:'Website trên Linux · nội dung trong ổ dữ liệu 8 GiB',T06:'Ứng dụng Docker đã duyệt · 1 tác vụ nhỏ · dữ liệu bền vững trong S3',
 T07:'Kho file riêng tư · 32 file, mỗi file 8 KiB · liên kết tải tối đa 15 phút',T08:'Hai máy Linux dùng chung EFS · 32 bản ghi nhỏ',
 T09:'API và dữ liệu serverless · 32 bản ghi · đọc bằng phiên đăng nhập của bạn',T10:'Kho phân tích riêng tư · nạp một dòng CSV minh họa từ S3 · truy vấn có giới hạn'};
-async function openCreate(t,rp){selected=catalogCache.get(t.template_id)||t;recoveryPoint=rp;$('#create-title').textContent=rp?'Khôi phục sang môi trường mới':'Tạo '+selected.name;$('#confirm-cost').checked=false;$('#configuration-description').textContent=descriptions[t.template_id];$('#backup-description').textContent=(selected.backup_scope||'Xem phạm vi bản sao trước khi khôi phục.')+' · Giữ bản sao 7 ngày.';$('#create-dialog').showModal();await updateQuote();}
+async function openCreate(t,rp){selected=catalogCache.get(t.template_id)||t;recoveryPoint=rp;$('#create-title').textContent=rp?'Khôi phục sang môi trường mới':'Tạo '+selected.name;$('#confirm-cost').checked=false;$('#configuration-description').textContent=descriptions[t.template_id];$('#backup-description').textContent=(selected.backup_scope||'Xem phạm vi bản sao trước khi khôi phục.')+' · Giữ bản sao 7 ngày.';lifecycle.configureCreate(selected);$('#create-dialog').showModal();await updateQuote();}
 
-async function updateQuote(){const serial=++quoteSerial;latestQuote=null;$('#confirm').disabled=true;const [data]=await Promise.all([post('/estimates',{template_id:selected.template_id,duration_hours:Number($('#hours').value)}),portal.loadLimits()]);if(serial!==quoteSerial)return;latestQuote=data;$('#quote').replaceChildren(element('strong',data.total_milliusd==null?'Chưa có đơn giá được duyệt':`Dự toán: ${(Number(data.total_milliusd)/1000).toFixed(3)} USD`),element('small',`Giá cập nhật: ${data.price_updated_at||'Chưa xác nhận'} · Region: ${data.region||'Chưa xác nhận'}`),element('p',(data.unknown||[]).join(' ')));const details=element('details');details.append(element('summary','Đơn giá và giả định'));details.append(element('pre',JSON.stringify({units:data.units,assumptions:data.assumptions,lines:data.lines},null,2)));$('#quote').append(details);$('#confirm').disabled=!portal.costAllowed(data);}
-async function submitCreate(ev){ev.preventDefault();if(busy||!portal.costAllowed(latestQuote))return;busy=true;$('#confirm').disabled=true;const body={template_id:selected.template_id,duration_hours:Number($('#hours').value)};if(recoveryPoint)body.recovery_point=recoveryPoint;const scope=JSON.stringify(body);try{const op=await post('/environments',body,idempotency(scope));commands.delete(scope);track(op);$('#create-dialog').close();await refresh();}catch(e){showError(e);}finally{busy=false;$('#confirm').disabled=!portal.costAllowed(latestQuote);}}
+async function updateQuote(){latestQuote=null;$('#confirm').disabled=true;$('#confirm-cost').checked=false;lifecycle.toggleCreate();const serial=++quoteSerial;const data=await post('/estimates',lifecycle.createRequest());if(serial!==quoteSerial)return;latestQuote=data;lifecycle.renderQuote(data);$('#confirm').disabled=!portal.costAllowed(data);}
+async function submitCreate(ev){ev.preventDefault();if(busy||!$('#confirm-cost').checked||!portal.costAllowed(latestQuote))return;busy=true;$('#confirm').disabled=true;const body=lifecycle.createRequest();if(recoveryPoint)body.recovery_point=recoveryPoint;const scope=JSON.stringify(body);try{const op=await post('/environments',body,idempotency(scope));commands.delete(scope);track(op);$('#create-dialog').close();await refresh();}catch(e){showError(e);}finally{busy=false;$('#confirm').disabled=!portal.costAllowed(latestQuote);}}
 function track(op){operations.set(op.operation_id,op);renderOperations();notice('Đã nhận tác vụ '+op.operation_id+'. Có thể theo dõi trạng thái bên dưới.');}
 async function downloadKey(eid){const key=await api('/environments/'+eid+'/ssh-key');const url=URL.createObjectURL(new Blob([key.private_key],{type:'application/x-pem-file'}));const link=element('a');link.href=url;link.download=key.filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Đã tải khóa riêng. Giữ file trên máy của bạn, không chia sẻ. Kết nối: '+key.command+' . Trên Linux/macOS dùng chmod 600 cho file khóa.');}
 function renderOperations(){$('#operations').replaceChildren();for(const op of [...operations.values()].sort((a,b)=>Number(b.created_at||0)-Number(a.created_at||0))){const card=element('article',undefined,'card');card.append(element('strong',`${op.action} · ${op.status}`),element('small',op.operation_id),element('p',`Bước: ${op.phase||''}`));if(op.error)card.append(element('p',op.error,'warning'));if(op.result){const d=element('details');d.append(element('summary','Dữ liệu trả về'),element('pre',JSON.stringify(op.result,null,2)));card.append(d);}portal.operationExtras(card,op);$('#operations').append(card);}}
@@ -55,7 +56,7 @@ function renderEnvironments(){
   $('#environments').replaceChildren();
   for(const e of portal.filter(cachedEnvironments).filter(e=>e.status!=='DELETED')){
     const card=element('article',undefined,'card');
-    card.append(element('small',e.environment_id),element('h3',e.template_id+' · '+(stateNames[e.status]||e.status)),element('p','Hạn phiên: '+timestamp(e.deadline)),element('small','Dự toán: '+((e.estimate?.total_milliusd||0)/1000).toFixed(3)+' USD'));
+    card.append(element('small',e.environment_id),element('h3',e.template_id+' · '+(stateNames[e.status]||e.status)),element('p',modeName(operatingPolicy(e).mode)+' · '+endingName(operatingPolicy(e).ending_policy)),element('p',e.status==='PAUSED'?'Đã tạm dừng; EBS còn phát sinh phí.':'Mốc xử lý tiếp theo: '+timestamp(e.deadline)),element('small','Dự toán đã cam kết cộng dồn: '+((e.estimate?.total_milliusd||0)/1000).toFixed(3)+' USD'));
     if(e.access_address){if(/^https?:\/\//.test(e.access_address)){const a=element('a','Mở địa chỉ truy cập');a.href=e.access_address;a.target='_blank';a.rel='noopener noreferrer';card.append(a);}else card.append(element('p',e.access_address));}
     if(e.needs_admin)card.append(element('p','Cần quản trị kiểm tra; tài nguyên có thể còn phát sinh phí.','warning'));
     portal.environmentExtras(card,e);
@@ -64,7 +65,7 @@ function renderEnvironments(){
     if(['T02','T06','T07'].includes(e.template_id))actions.append(button('Quản lý file',()=>openFiles(e),unready));
     if(e.template_id==='T09')actions.append(button('Đọc API có đăng nhập',()=>readOwnedApi(e),unready));
     if(['T03','T04','T08','T09','T10'].includes(e.template_id))actions.append(button('Dữ liệu minh họa',()=>openRecords(e),unready));
-    actions.append(button('Sao lưu',()=>command(e.environment_id,'backup'),unready),button('Gia hạn 1 giờ',()=>extend(e.environment_id),unready),button('Sao lưu và thu hồi',()=>command(e.environment_id,'destroy'),!['READY','ERROR_RETAINED','CREATE_FAILED'].includes(e.status)||!!e.lock));
+    lifecycle.controls(actions,e);
     card.append(actions);
     if(e.cleanup_report){const details=element('details');details.append(element('summary','Báo cáo sau thu hồi'),element('pre',JSON.stringify(e.cleanup_report,null,2)));card.append(details);}
     $('#environments').append(card);
@@ -121,7 +122,9 @@ $('#login').onclick=()=>login().catch(showError);$('#logout').onclick=()=>logout
 async function start(){await callback();$('#login').hidden=!!accessToken;$('#signup').hidden=!!accessToken;$('#logout').hidden=!accessToken;if(!cfg.configured){notice('Chưa triển khai AWS. Cấu hình và minh chứng thật đang chờ xác nhận.');return;}if(!accessToken){notice('Đăng nhập để xem danh mục và quản lý môi trường.');return;}const account=await api('/account');emailVerified=account.email_verified===true;if(!emailVerified){notice('Xác thực email trước khi quản lý môi trường. Mở Tài khoản để gửi và nhập mã xác thực.');$('#account-settings').hidden=false;return;}notice('Đã đăng nhập. Chỉ mẫu đã kiểm chứng mới cho phép tạo.');await Promise.all([loadCatalog(),refresh()]);if(portal.isAdmin())await portal.loadAdmin();}
 setInterval(async()=>{if(!accessToken||!emailVerified||document.hidden)return;try{for(const [id,op]of operations){if(!['SUCCEEDED','FAILED','CANCELLED'].includes(op.status))operations.set(id,await api(op.admin_actor&&portal.isAdmin()?'/admin/operations/'+id:'/operations/'+id));}renderOperations();await refresh();}catch(e){showError(e);}},10000);
 async function mutate(path,body={}){const scope=path+'/'+JSON.stringify(body),result=await post(path,body,idempotency(scope));commands.delete(scope);return result;}
+const lifecycle=createLifecycleUI({api,mutate,track,refresh,element,timestamp,notice});
 const portal=createPortal({api,post,notice,element,button,timestamp,track,refresh,operations,renderOperations,cfg,getToken:()=>accessToken,ensureToken,mutate,onEmailVerified:start});
+for(const id of ['operating-mode','operating-period','ending-policy','operating-budget'])$('#'+id).addEventListener('change',()=>updateQuote().catch(showError));
 for(const id of ['environment-search','environment-status','environment-template'])$('#'+id).addEventListener(id==='environment-search'?'input':'change',renderEnvironments);
 start().catch(showError);
 

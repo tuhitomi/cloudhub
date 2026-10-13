@@ -21,9 +21,10 @@ def build(destination):
     html = html.replace("CloudHub • Môi trường học tập", "CloudHub • Xem trước giao diện")
     html = html.replace('class="brand" href="/"', 'class="brand" href="./"')
     # Remove credential and mutation forms entirely from the public preview.
-    html = re.sub(r'<dialog id="(?:files|records|password|account|action)-dialog">.*?</dialog>', '', html, flags=re.S)
+    html = re.sub(r'<dialog id="(?:files|records|password|account|action|login|signup|verification|management|environment-detail)-dialog"[^>]*>.*?</dialog>', '', html, flags=re.S)
     html = re.sub(r'<section id="admin".*?</section>', '', html, flags=re.S)
     html = html.replace('<button id="forgot-password">', '<button id="forgot-password" disabled>')
+    html = html.replace('<button id="signup">','<button id="signup" disabled>')
     html = html.replace('<button id="login">', '<button id="login" disabled>')
     html = html.replace('TỪ Ý TƯỞNG ĐẾN MÔI TRƯỜNG CLOUD', 'BẢN XEM TRƯỚC · BACKEND ĐANG CHỜ TRIỂN KHAI')
     html = html.replace('Đang tải cấu hình…', 'Bản xem trước giao diện. Đăng nhập và tạo môi trường sẽ mở sau khi kết nối backend AWS.')

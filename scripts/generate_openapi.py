@@ -89,10 +89,12 @@ paths['/environments/{environment_id}/share']={'post':operation('shareFile','pos
 schemas['Operation']['properties']['result']=schema_ref('Object')
 from portal_openapi import extend
 extend(paths,schemas,operation,param,schema_ref)
+from lifecycle_openapi import extend as extend_lifecycle
+extend_lifecycle(paths,schemas,operation,param,schema_ref)
 
 doc={'openapi':'3.0.3','info':{'title':'CloudHub','version':'0.3.0','description':'T01–T10 source; AWS validation gate required. All IDs are server-generated. Epoch timestamps in UTC seconds.'},'servers':[{'url':'https://{api_id}.execute-api.{region}.amazonaws.com','variables':{'api_id':{'default':'REQUIRED'},'region':{'default':'REQUIRED'}}}],'paths':paths,'components':{'securitySchemes':{'Cognito':{'type':'oauth2','flows':{'authorizationCode':{'authorizationUrl':'https://REQUIRED.auth.REQUIRED.amazoncognito.com/oauth2/authorize','tokenUrl':'https://REQUIRED.auth.REQUIRED.amazoncognito.com/oauth2/token','scopes':{'cloudhub/use':'Use CloudHub'}}}}},'schemas':schemas}}
 doc['components']['securitySchemes']['CognitoAccessToken']={'type':'http','scheme':'bearer','bearerFormat':'JWT','description':'Cognito access token from the same configured user pool and app client, with aws.cognito.signin.user.admin scope. API Gateway verifies signature, issuer, audience and scopes; backend checks access token type, enabled account, ownership and current admin membership.'}
-doc['info']['version']='0.4.2'
+doc['info']['version']='0.5.0'
 doc['info']['description']+=' Password reset/change and email verification use Cognito directly; passwords never enter this API.'
 (ROOT/'docs/openapi.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
 print('Generated docs/openapi.json')

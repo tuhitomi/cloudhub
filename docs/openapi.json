@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "CloudHub",
-    "version": "0.4.2",
+    "version": "0.5.0",
     "description": "T01–T10 source; AWS validation gate required. All IDs are server-generated. Epoch timestamps in UTC seconds. Password reset/change and email verification use Cognito directly; passwords never enter this API."
   },
   "servers": [
@@ -1544,7 +1544,7 @@
     },
     "/environments/{environment_id}/extend": {
       "post": {
-        "operationId": "extend",
+        "operationId": "legacyExtend",
         "security": [
           {
             "Cognito": [
@@ -1556,12 +1556,12 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
+          "202": {
+            "description": "Accepted",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Object"
+                  "$ref": "#/components/schemas/Operation"
                 }
               }
             }
@@ -1615,16 +1615,6 @@
                 }
               }
             }
-          },
-          "403": {
-            "description": "Email unverified, account disabled or current admin role required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
           }
         },
         "parameters": [
@@ -1656,7 +1646,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Delegates to shared renewable lifecycle, preserves infrastructure/data and returns a durable operation for schedule sync. No cumulative hours bypass: charges the environment/user/global estimate ledgers."
       }
     },
     "/environments/{environment_id}/put_record": {
@@ -4483,6 +4474,623 @@
         },
         "description": "Admin JWT and enabled Cognito account with current admin group membership required."
       }
+    },
+    "/environments/{environment_id}/renew": {
+      "post": {
+        "operationId": "renew",
+        "security": [
+          {
+            "Cognito": [
+              "cloudhub/use"
+            ]
+          },
+          {
+            "CognitoAccessToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned entity not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, quota or verification gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{8,100}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenewInput"
+              }
+            }
+          }
+        },
+        "description": "Atomic deadline/revision/estimate update; no processor create/stop/delete. Schedule sync failure keeps the new deadline with a durable retryable operation."
+      }
+    },
+    "/environments/{environment_id}/change_policy": {
+      "post": {
+        "operationId": "change_policy",
+        "security": [
+          {
+            "Cognito": [
+              "cloudhub/use"
+            ]
+          },
+          {
+            "CognitoAccessToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned entity not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, quota or verification gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{8,100}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyInput"
+              }
+            }
+          }
+        },
+        "description": "Explicit consent, fresh ownership/revision and environment lock. Current deadline is unchanged; budget ledger never resets. Additional terminal storage allowance may be charged."
+      }
+    },
+    "/environments/{environment_id}/resume_paused": {
+      "post": {
+        "operationId": "resume_paused",
+        "security": [
+          {
+            "Cognito": [
+              "cloudhub/use"
+            ]
+          },
+          {
+            "CognitoAccessToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned entity not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, quota or verification gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{8,100}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleConsent"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/environments/{environment_id}/end": {
+      "post": {
+        "operationId": "end",
+        "security": [
+          {
+            "Cognito": [
+              "cloudhub/use"
+            ]
+          },
+          {
+            "CognitoAccessToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned entity not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, quota or verification gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{8,100}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleConsent"
+              }
+            }
+          }
+        },
+        "description": "Applies confirmed PAUSE (T01/T05 only) or BACKUP_RETIRE. Mandatory backup failure retains source, bounded automatic retry and administrative alert."
+      }
+    },
+    "/environments/{environment_id}/management-estimate": {
+      "post": {
+        "operationId": "management_estimate",
+        "security": [
+          {
+            "Cognito": [
+              "cloudhub/use"
+            ]
+          },
+          {
+            "CognitoAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned entity not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, quota or verification gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagementEstimateInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/environments/{environment_id}/renewals": {
+      "get": {
+        "operationId": "renewalHistory",
+        "security": [
+          {
+            "Cognito": [
+              "cloudhub/use"
+            ]
+          },
+          {
+            "CognitoAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned entity not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, quota or verification gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -4546,8 +5154,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "template_id",
-          "duration_hours"
+          "template_id"
         ],
         "properties": {
           "template_id": {
@@ -4568,16 +5175,57 @@
           "duration_hours": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 8
+            "maximum": 8,
+            "description": "Legacy input: explicit automatic backup-retirement after this period; never enables auto renewal."
+          },
+          "estimate_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Forecast horizon only; never sets the operating deadline."
+          },
+          "operating_policy": {
+            "$ref": "#/components/schemas/OperatingPolicy"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "duration_hours"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "estimate_hours"
+                  ]
+                },
+                {
+                  "required": [
+                    "operating_policy"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "estimate_hours",
+              "operating_policy"
+            ],
+            "not": {
+              "required": [
+                "duration_hours"
+              ]
+            }
+          }
+        ]
       },
       "CreateInput": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "template_id",
-          "duration_hours"
+          "template_id"
         ],
         "properties": {
           "template_id": {
@@ -4598,7 +5246,8 @@
           "duration_hours": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 8
+            "maximum": 8,
+            "description": "Legacy input: explicit automatic backup-retirement after this period; never enables auto renewal."
           },
           "configuration": {
             "description": "Omit or submit the exact configuration returned by the catalog.",
@@ -5030,8 +5679,49 @@
           "validation_run": {
             "type": "boolean",
             "default": false
+          },
+          "estimate_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Forecast horizon only; never sets the operating deadline."
+          },
+          "operating_policy": {
+            "$ref": "#/components/schemas/OperatingPolicy"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "duration_hours"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "estimate_hours"
+                  ]
+                },
+                {
+                  "required": [
+                    "operating_policy"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "estimate_hours",
+              "operating_policy"
+            ],
+            "not": {
+              "required": [
+                "duration_hours"
+              ]
+            }
+          }
+        ]
       },
       "FileInput": {
         "type": "object",
@@ -5152,7 +5842,11 @@
               "query_demo",
               "delete_backup",
               "export_backup",
-              "cost"
+              "cost",
+              "renew",
+              "change_policy",
+              "pause",
+              "resume_paused"
             ]
           },
           "status": {
@@ -5166,7 +5860,8 @@
             ]
           },
           "phase": {
-            "type": "string"
+            "type": "string",
+            "description": "Durable processor phase; lifecycle adds SYNC_SCHEDULE, PAUSE, PAUSE_AUDIT, CANCEL_SCHEDULE, START_RESTART, WAIT_RESTART, START_FOR_RETIRE and WAIT_RETIRE_READY."
           },
           "error": {
             "type": "string"
@@ -5193,6 +5888,23 @@
           },
           "cancel_note": {
             "type": "string"
+          },
+          "target_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional UI revision fence; mismatch returns 409."
+          },
+          "deadline": {
+            "type": "integer"
+          },
+          "period_estimate": {
+            "$ref": "#/components/schemas/Object"
+          },
+          "cumulative_milliusd": {
+            "type": "integer"
+          },
+          "automatic": {
+            "type": "boolean"
           }
         }
       },
@@ -5304,7 +6016,10 @@
               "DELETED",
               "RESIDUAL",
               "ERROR_RETAINED",
-              "CREATE_FAILED"
+              "CREATE_FAILED",
+              "PAUSING",
+              "PAUSED",
+              "RESTARTING"
             ]
           },
           "duration_hours": {
@@ -5363,6 +6078,41 @@
           },
           "cost_report": {
             "$ref": "#/components/schemas/CostReport"
+          },
+          "operating_schema": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "operating_policy": {
+            "$ref": "#/components/schemas/OperatingPolicyRead"
+          },
+          "lifecycle_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional UI revision fence; mismatch returns 409."
+          },
+          "estimated_committed_milliusd": {
+            "type": "integer"
+          },
+          "schedule_pending": {
+            "type": "boolean"
+          },
+          "cost_plan": {
+            "$ref": "#/components/schemas/Object"
+          },
+          "first_period_estimate": {
+            "$ref": "#/components/schemas/Object"
+          },
+          "last_period_estimate": {
+            "$ref": "#/components/schemas/Object"
+          },
+          "pause_report": {
+            "$ref": "#/components/schemas/Object"
+          },
+          "renewal_blocked_reason": {
+            "$ref": "#/components/schemas/Object"
           }
         }
       },
@@ -5992,6 +6742,243 @@
             }
           }
         }
+      },
+      "OperatingPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "AUTO_OFF",
+              "AUTO_RENEW"
+            ]
+          },
+          "period_minutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480
+          },
+          "ending_policy": {
+            "type": "string",
+            "enum": [
+              "PAUSE",
+              "BACKUP_RETIRE"
+            ]
+          },
+          "budget_limit_milliusd": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "description": "Required positive cumulative lifetime estimate cap for AUTO_RENEW; null for AUTO_OFF."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "period_minutes",
+          "ending_policy",
+          "budget_limit_milliusd",
+          "confirmed"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "AUTO_RENEW"
+                ]
+              },
+              "budget_limit_milliusd": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "AUTO_OFF"
+                ]
+              },
+              "budget_limit_milliusd": {
+                "enum": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "OperatingPolicyRead": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "AUTO_OFF",
+              "AUTO_RENEW"
+            ]
+          },
+          "period_minutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480
+          },
+          "ending_policy": {
+            "type": "string",
+            "enum": [
+              "PAUSE",
+              "BACKUP_RETIRE"
+            ]
+          },
+          "budget_limit_milliusd": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "description": "Required positive cumulative lifetime estimate cap for AUTO_RENEW; null for AUTO_OFF."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "period_minutes",
+          "ending_policy",
+          "budget_limit_milliusd",
+          "confirmed"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "AUTO_RENEW"
+                ]
+              },
+              "budget_limit_milliusd": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "AUTO_OFF"
+                ]
+              },
+              "budget_limit_milliusd": {
+                "enum": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "RenewInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480
+          },
+          "confirmed": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional UI revision fence; mismatch returns 409."
+          }
+        },
+        "required": [
+          "minutes",
+          "confirmed"
+        ]
+      },
+      "LifecycleConsent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional UI revision fence; mismatch returns 409."
+          }
+        },
+        "required": [
+          "confirmed"
+        ]
+      },
+      "PolicyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operating_policy": {
+            "$ref": "#/components/schemas/OperatingPolicy"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional UI revision fence; mismatch returns 409."
+          }
+        },
+        "required": [
+          "operating_policy"
+        ]
+      },
+      "ManagementEstimateInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "renew",
+              "resume_paused",
+              "change_policy",
+              "end",
+              "destroy",
+              "backup"
+            ]
+          },
+          "minutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480
+          },
+          "operating_policy": {
+            "$ref": "#/components/schemas/OperatingPolicy"
+          }
+        },
+        "required": [
+          "action"
+        ]
       }
     }
   }

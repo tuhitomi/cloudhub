@@ -1,5 +1,5 @@
 """Botocore Stubber verifies real AWS SDK shapes, still LOCAL MOCK only."""
-import sys
+import sys,json,hashlib
 import unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
@@ -76,10 +76,11 @@ class SDKTests(unittest.TestCase):
             self.assertEqual(error.exception.code,'RESOURCE_SCOPE_MISMATCH')
     def test_scheduler_idempotency_and_disabled_flexible_window(self):
         scheduler=Stubber(self.clients['scheduler']);self.env['deadline']=3600
-        params={'Name':'env-test-3600','GroupName':'test-group','ScheduleExpression':'at(1970-01-01T01:00:00)','ScheduleExpressionTimezone':'UTC',
-            'FlexibleTimeWindow':{'Mode':'OFF'},'ActionAfterCompletion':'DELETE','ClientToken':'env-test-3600',
-            'Target':{'Arn':self.settings['expiry_arn'],'RoleArn':self.settings['scheduler_role'],'Input':'{"environment_id": "env-test"}',
+        params={'Name':'env-test-lifecycle','GroupName':'test-group','ScheduleExpression':'at(1970-01-01T01:00:00)','ScheduleExpressionTimezone':'UTC',
+            'FlexibleTimeWindow':{'Mode':'OFF'},'ActionAfterCompletion':'NONE','State':'ENABLED','ClientToken':hashlib.sha256(b'env-test-lifecycle|3600|0|0').hexdigest(),
+            'Target':{'Arn':self.settings['expiry_arn'],'RoleArn':self.settings['scheduler_role'],'Input':json.dumps({'environment_id':'env-test','expected_deadline':3600,'expected_revision':0},sort_keys=True),
                       'RetryPolicy':{'MaximumEventAgeInSeconds':3600,'MaximumRetryAttempts':3},'DeadLetterConfig':{'Arn':self.settings['dlq_arn']}}}
+        scheduler.add_client_error('get_schedule','ResourceNotFoundException',expected_params={'Name':'env-test-lifecycle','GroupName':'test-group'})
         scheduler.add_response('create_schedule',{'ScheduleArn':'arn:aws:scheduler:us-east-1:123456789012:schedule/test-group/env-test-3600'},params)
         with scheduler:self.driver.schedule(self.env)
     def test_dynamodb_transaction_contains_all_quota_and_lock_conditions(self):

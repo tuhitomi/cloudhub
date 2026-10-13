@@ -296,19 +296,42 @@ class AWSDriver:
         return report
 
     def schedule(self, env):
-        stamp = datetime.fromtimestamp(int(env["deadline"]), timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-        name = env["environment_id"] + "-" + str(env["deadline"])
-        try:
-            self.scheduler.create_schedule(Name=name, GroupName=self.settings["schedule_group"],
-                ScheduleExpression="at(" + stamp + ")", ScheduleExpressionTimezone="UTC",
-                FlexibleTimeWindow={"Mode": "OFF"}, ActionAfterCompletion="DELETE",
-                ClientToken=name, Target={"Arn": self.settings["expiry_arn"], "RoleArn": self.settings["scheduler_role"],
-                    "Input": json.dumps({"environment_id": env["environment_id"]}),
-                    "RetryPolicy": {"MaximumEventAgeInSeconds": 3600, "MaximumRetryAttempts": 3},
-                    "DeadLetterConfig": {"Arn": self.settings["dlq_arn"]}})
-        except Exception as exc:
-            if code(exc) != "ConflictException":
-                raise
+        from .lifecycle_scheduler import LifecycleScheduler
+        LifecycleScheduler(self.scheduler,self.settings).schedule(env)
+
+    def cancel_schedule(self,env):
+        from .lifecycle_scheduler import LifecycleScheduler
+        LifecycleScheduler(self.scheduler,self.settings).cancel(env)
+
+    def pause(self,env):
+        from .operating_policy import PAUSABLE
+        if env['template_id'] not in PAUSABLE:raise HubError('PAUSE_UNSUPPORTED','Mẫu không hỗ trợ tạm dừng.',409)
+        self.assert_instance(env)
+        state=self.ec2.describe_instances(InstanceIds=[env['instance_id']])['Reservations'][0]['Instances'][0]['State']['Name']
+        if state=='running':self.ec2.stop_instances(InstanceIds=[env['instance_id']]);return False
+        if state=='stopped':return True
+        if state not in {'stopping','pending'}:raise HubError('PAUSE_INVALID_STATE','Instance không thể tạm dừng an toàn.',409)
+        return False
+
+    def pause_audit(self,env,backups):
+        self.assert_instance(env);self.inventory(env)
+        instance=self.ec2.describe_instances(InstanceIds=[env['instance_id']])['Reservations'][0]['Instances'][0]
+        if instance['State']['Name']!='stopped':raise HubError('PAUSE_NOT_CONFIRMED','Chưa xác nhận EC2 stopped.',409)
+        ids={row['id'] for row in env['resources']}|{self.stack_name(env)}
+        root_ids={row['id'] for row in env['resources'] if row.get('logical_id')=='RootVolume'}
+        if not root_ids:raise HubError('PAUSE_DATA_UNVERIFIED','Chưa kiểm kê volume hệ điều hành được giữ.',409)
+        report=self.audit(env,backups);expected=[];unexpected=[]
+        for item in report['residual']:
+            (expected if item['id'] in ids else unexpected).append(item)
+        report['retained'].extend(expected);report['residual']=unexpected
+        report.update(ending_policy='PAUSE',instance_state='stopped',quota_released=False,
+            billable=[r for r in report['retained']+report['residual'] if r['type'] in {'AWS::EC2::Volume','AWS::EC2::Snapshot'}],
+            cost_note='EC2 stopped không tính compute; root/data EBS, bản sao và log còn lưu có thể tính phí. Không xóa stack, volume hoặc dữ liệu.')
+        retained_ids={row['id'] for row in report['retained'] if row['type']=='AWS::EC2::Volume'}
+        if not ({env['data_volume_id']}|root_ids)<=retained_ids:
+            raise HubError('PAUSE_DATA_UNVERIFIED','Chưa xác nhận volume dữ liệu được giữ.',409)
+        env['public_ip']=None;env['access_address']=None
+        return report
 
     def expire_backup(self, rp):
         """Missing local metadata is not evidence that AWS has no backup."""

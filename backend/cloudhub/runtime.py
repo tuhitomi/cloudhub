@@ -1,6 +1,6 @@
 import json
 import os
-from functools import lru_cache
+import time
 from .cost import Estimator
 from .service import Service
 from .store import DynamoStore
@@ -11,15 +11,21 @@ def build_service():
         verified=filter(None, os.getenv("VERIFIED_TEMPLATES", "").split(",")),
         validation=filter(None, os.getenv("VALIDATION_TEMPLATES", "").split(",")),
         user_limit=int(os.getenv("USER_LIMIT", "2")), total_limit=int(os.getenv("TOTAL_LIMIT", "4")),
-        budget_milliusd=int(os.environ["BUDGET_MILLIUSD"]),workflow_terminal=workflow_terminal)
+        budget_milliusd=int(os.environ["BUDGET_MILLIUSD"]),workflow_terminal=workflow_terminal,
+        price_provider=lambda:load_prices(os.getenv('PRICES_PARAMETER')))
 
-@lru_cache(maxsize=1)
+_PRICE_CACHE={}
 def load_prices(parameter_name):
     if not parameter_name:return json.loads(os.environ['PRICES_JSON'])
+    cached=_PRICE_CACHE.get(parameter_name)
+    if cached and time.monotonic()-cached['at']<60:return cached['rates']
     import boto3
     from botocore.config import Config
     client=boto3.client('ssm',config=Config(connect_timeout=.4,read_timeout=.7,retries={'total_max_attempts':1}))
-    return json.loads(client.get_parameter(Name=parameter_name,WithDecryption=False)['Parameter']['Value'])
+    try:rates=json.loads(client.get_parameter(Name=parameter_name,WithDecryption=False)['Parameter']['Value'])
+    except Exception:
+        return {**(cached['rates'] if cached else {}),'approved':False,'pricing_unavailable':True}
+    _PRICE_CACHE[parameter_name]={'at':time.monotonic(),'rates':rates};return rates
 
 def build_driver():
     return DriverRouter(json.loads(os.environ["DRIVER_SETTINGS"]))
@@ -51,7 +57,13 @@ def workflow_terminal(op):
 
 def expiry_handler(event, context=None):
     service = build_service()
-    op = service.expire(event["environment_id"])
+    if 'expected_deadline' not in event or 'expected_revision' not in event:
+        from .operating_policy import revision
+        env=service.store.get('E#'+event['environment_id'])
+        # Legacy callbacks cannot identify their old deadline. Once management has
+        # changed the revision, only the new fenced schedule (or fresh sweep) acts.
+        if not env or revision(env)>0:return {'accepted':False}
+    op = service.expire(event["environment_id"],event.get('expected_deadline'),event.get('expected_revision'))
     if op:
         dispatch(op["operation_id"])
     return {"accepted": bool(op)}
@@ -67,14 +79,18 @@ def sweep_handler(event, context=None):
                 op = service.expire(env["environment_id"])
                 if op:
                     dispatch(op["operation_id"])
-            elif env["status"] == "READY" and env.get("schedule_pending"):
-                driver.schedule(env)
-                env["schedule_pending"] = False
-                service.save(env)
+            elif env.get('schedule_pending') and not env.get('lock'):
+                repair=service.enqueue_schedule_repair(env['environment_id'])
+                if repair:dispatch(repair['operation_id'])
+            # Scheduler repair is a durable operation holding the environment lock.
+            # Never perform an unfenced read/SDK/update sequence from the sweeper.
         except Exception as exc:
             errors.append({"environment_id": env["environment_id"], "error": type(exc).__name__})
     for op in service.store.scan_kind("operation"):
         try:
+            recovered=service.retry_automatic_operation(op)
+            if recovered:
+                dispatch(recovered['operation_id']);continue
             if op["status"] == "QUEUED":
                 dispatch(op["operation_id"])
             if op["status"] in {"QUEUED", "RUNNING"}:

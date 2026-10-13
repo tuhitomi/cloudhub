@@ -4,7 +4,9 @@ Nguồn 0.4.0 thêm `AlertEmail` (mặc định trống) và `ActualCostsEnabled
 
 Chạy `npm ci` trước `scripts/check.py` để cài dependency kiểm thử DOM. `configure_frontend.py` cần output `Region`; upload cả `portal.js`. Đăng nhập Cognito lại để lấy scope `aws.cognito.signin.user.admin` cho luồng mật khẩu.
 
-**Backend dự phòng `cloudhub-pages-live` đã triển khai và cập nhật thành công; giao diện tại https://tuhitomi.github.io/cloudhub/.** Xem [cách kết nối Pages](github-pages.md). Stack CloudFront gốc `cloudhub-demo` vẫn ROLLBACK_COMPLETE; không tạo lại/xóa dữ liệu retained chưa kiểm kê. Các bước CloudFront dưới đây dành cho phương án D01 gốc, không phải điều kiện chặn backend dự phòng.
+**CloudHub chính chạy hoàn toàn trên AWS tại [CloudHub](https://d3qujq9kfq5gca.cloudfront.net/), stack `cloudhub-pages-live`: S3 riêng tư/CloudFront/OAC, Cognito, API Gateway, Lambda, DynamoDB, Scheduler, Step Functions và CloudFormation.** GitHub chỉ lưu mã và chạy kiểm tra. Pages là phương án lịch sử, không xuất bản bản chính tại đó. Stack gốc `cloudhub-demo` vẫn là dấu vết triển khai cũ; không tự xóa dữ liệu retained hoặc shared control plane.
+
+Nguồn 0.5 thêm chế độ vận hành và chu kỳ riêng, dự toán cộng dồn, tạm dừng T01/T05 và đồng bộ lịch có khóa. Môi trường cũ giữ AUTO_OFF/BACKUP_RETIRE; không chạy migration tự bật gia hạn. Xem [cấu hình, chi phí, migration và kiểm chứng](operating-modes.md) trước khi áp dụng. Chuẩn bị phiếu tài nguyên/dự toán/cách thu hồi, xác nhận account/region/credits/cash/quyền, review changeset không thay thế pool/client/bảng dữ liệu rồi mới thực thi. Giữ đầy đủ GetSchedule/UpdateSchedule và quyền lịch chỉ trên env-* của group dự án; không tăng quota hoặc nâng Paid Plan tự động.
 
 ## Trước lệnh tạo AWS
 
@@ -24,7 +26,7 @@ sam build --template infra/control-plane.json
 
 ## Deploy sau review cụ thể
 
-Sử dụng `sam deploy --guided --capabilities CAPABILITY_IAM --region ap-southeast-1`, profile đã được duyệt nếu dùng local. Nhập tham số từ config/sam-parameters.json và **review changeset trước thực thi**. Chọn stack name ngắn/chữ thường như cloudhub-demo. Không dùng tham số draft còn placeholder. Giá public lưu SSM để tránh vượt giới hạn 4 KiB environment variables Lambda. Bảng giá được cache trong worker warm runtime; thay giá cần redeploy/refresh worker và kiểm lại quotes.
+Sử dụng `sam deploy --guided --capabilities CAPABILITY_IAM --region ap-southeast-1`, profile đã được duyệt nếu dùng local. Nhập tham số từ config/sam-parameters.json và **review changeset trước thực thi**. Với stack đã có, giữ nguyên tên/physical IDs/cấu hình identity và dữ liệu; không tạo stack thay thế để né lỗi. Không dùng tham số draft còn placeholder. Giá public lưu SSM để tránh vượt giới hạn 4 KiB environment variables Lambda. Bảng giá được đọc lại tối đa mỗi 60 giây; khi lần đọc mới lỗi, không coi cache cũ là đơn giá đã được duyệt. Kiểm lại quotes trước tạo/gia hạn.
 
 Lấy outputs thật bằng CloudFormation describe-stacks vào work-stack-outputs.json, chạy `python scripts/configure_frontend.py work-stack-outputs.json`, sync frontend vào FrontendBucket, invalidation distribution. config.js là metadata công khai; access token chỉ sessionStorage. Tạo 4 user Cognito theo phân công; admin group dành cho người kiểm chứng. Tạo/đổi quyền và credentials cần chủ tài khoản xác nhận tại thao tác, không gửi password/token vào chat hoặc evidence. Đăng ký SNS và xác nhận subscription trước tuyên bố nhận cảnh báo.
 
@@ -32,11 +34,11 @@ Lấy outputs thật bằng CloudFormation describe-stacks vào work-stack-outpu
 
 T01/T02/T03/T04 là mốc bốn mẫu; tiếp tục T05/T07/T06/T09/T08/T10. `aws_lifecycle.py` hỗ trợ đủ 10, dùng account check và hai Cognito user khác nhau. T01/T05 cần OpenSSH client thuộc CIDR được duyệt. POSIX ghi PEM mode 0600; Windows giới hạn DACL thư mục tạm chỉ SID hiện tại trước khi ghi PEM; khóa bị xóa khi xong. SSM dành cho operator, không thay thế chứng minh SSH owner. Không có terminal web.
 
-`run_validation.py` chạy tuần tự danh sách đã duyệt và dừng khi mẫu lỗi để giữ nguồn. Ghi evidence IDs/checksum/audit, không credentials hay signed URL. `review_evidence.py` chỉ đề xuất gate khi có ít nhất 2 vòng thật đã pass và restore/audit/authorization đủ; không tự sửa AWS. Chưa có bằng chứng thật nào trong gói hiện tại.
+`run_validation.py` kiểm vòng đời cơ sở, chạy tuần tự danh sách đã duyệt và dừng khi mẫu lỗi để giữ nguồn. Ghi evidence IDs/checksum/audit, không credentials hay signed URL. `review_evidence.py` chỉ đề xuất gate khi có ít nhất 2 vòng thật đã pass và restore/audit/authorization đủ; không tự sửa AWS. Kết quả LOCAL/mock và vòng cơ sở phải tách khỏi bằng chứng chế độ vận hành mới, ghi riêng trong operating-modes.md.
 
 ## Sao lưu và lỗi
 
-Mỗi template có scope riêng trong templates.md; restore dựng environment mới. Không đổi kích thước tài nguyên; chỉ gia hạn thời lượng có quota/lock/deadline fence. T01/T05 clean shutdown; RDS app chỉ ghi qua operation lock; EFS remount readonly cả hai máy; T06/S3/DynamoDB/Redshift chỉ ghi dữ liệu được đăng ký qua CloudHub. Backup hoặc checksum lỗi → ERROR_RETAINED/CREATE_FAILED, needs_admin, giữ nguồn/quota. Sửa nguyên nhân và retry có giới hạn qua operation key mới, không bỏ qua final backup. Retry lỗi mạng cùng yêu cầu dùng lại key cũ.
+Mỗi template có scope riêng trong templates.md; restore dựng environment mới. Gia hạn giữ nguồn, chỉ đổi deadline/ledger/lịch bằng transaction và khóa; không gọi create hoặc stop. Tạm dừng T01/T05 giữ instance/root/data EBS, còn phí lưu trữ và vẫn chiếm quota; mở lại cùng nguồn, IP có thể đổi. Thu hồi cần final backup: T01/T05 clean shutdown; RDS app chỉ ghi qua operation lock; EFS remount readonly cả hai máy; T06/S3/DynamoDB/Redshift chỉ ghi dữ liệu được đăng ký qua CloudHub. Backup hoặc checksum lỗi → ERROR_RETAINED/CREATE_FAILED, needs_admin, giữ nguồn/quota và có giới hạn retry; không tiếp tục dừng/xóa nguồn. Retry lỗi mạng cùng yêu cầu dùng lại key cũ. Deadline đã commit nhưng Scheduler lỗi phải giữ schedule_pending và retry operation đồng bộ, không cộng thêm kỳ/chi phí.
 
 RDS có managed secret mới và snapshot restore; T04 app/ASG dựng mới. EFS restore vào filesystem mới đã tag đúng, AWS Backup tạo thư mục restore, driver kiểm/copy /records và đọc hai máy. T10 restore qua CF SnapshotName, rebind CopyRole mới; giữ nguồn khi SQL/checksum/role/usage limit không đúng. Daily Redshift limit 8 RPU-hour có thể deactivate workload; không tăng limit tự động để hoàn tất backup. Plan/quota/SDK paths phải kiểm thật.
 

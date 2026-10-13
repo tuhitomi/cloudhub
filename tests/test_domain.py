@@ -24,6 +24,7 @@ class Driver:
     def created(self,e): e.update(instance_id='i-mock',data_volume_id='vol-mock'); return True
     def ready(self,e,o,r): self.calls.append('restore_data_check' if r else 'ready'); return True
     def schedule(self,e): self.calls.append('schedule')
+    def cancel_schedule(self,e): self.calls.append('cancel_schedule')
     def backup(self,e,o,r):
         self.calls.append('backup')
         if self.fail_backup: raise HubError('BACKUP_FAILED','mock backup failure',409)
@@ -156,13 +157,14 @@ class DomainTests(unittest.TestCase):
         self.assertIsNotNone(result['expiry_operation_id'])
         self.assertEqual(self.store.get(env['pk'])['status'],'RETIRING')
     def test_stale_expiry_read_is_fenced_by_new_deadline(self):
-        env=self.ready();self.now=env['deadline'];command=self.s.command
-        def interleaved(*a,**kw):
-            self.now=env['deadline']-1
-            self.s.extend('alice',env['environment_id'],'extendkey',{'hours':1})
-            self.now=env['deadline']
-            return command(*a,**kw)
-        self.s.command=interleaved
+        env=self.ready();self.now=env['deadline'];original=self.store.commit;changed=[False]
+        def interleaved(rows,expected):
+            if not changed[0] and any(row.get('auto_termination') for row in rows):
+                changed[0]=True;self.now=env['deadline']-1
+                self.s.extend('alice',env['environment_id'],'extendkey',{'hours':1})
+                self.now=env['deadline']
+            return original(rows,expected)
+        self.store.commit=interleaved
         self.assertIsNone(self.s.expire(env['environment_id']))
         self.assertEqual(self.store.get(env['pk'])['status'],'READY')
     @patch.dict(os.environ, {"USER_POOL_ID":"test-pool"})

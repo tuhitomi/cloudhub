@@ -72,9 +72,17 @@ def handler(event, context=None):
         elif method == "GET" and path == "/templates":
             result = {"items": catalog(SERVICE.verified)}
         elif method == "POST" and path == "/estimates":
-            if set(body) != {"template_id", "duration_hours"} or body["template_id"] not in IMPLEMENTED or type(body["duration_hours"]) is not int or not 1 <= body["duration_hours"] <= 8:
-                raise HubError("INVALID_INPUT", "Chọn mẫu có dự toán và thời lượng 1–8 giờ.")
-            result = SERVICE.estimator.estimate(body["template_id"], body["duration_hours"])
+            SERVICE.refresh_pricing()
+            from .operating_policy import validate_policy,plan
+            if body.get('template_id') not in IMPLEMENTED:raise HubError('INVALID_INPUT','Chọn mẫu có dự toán.')
+            if set(body)=={'template_id','duration_hours'} and type(body['duration_hours']) is int and 1<=body['duration_hours']<=8:
+                result=SERVICE.estimator.estimate(body['template_id'],body['duration_hours'])
+            elif set(body)=={'template_id','estimate_hours','operating_policy'}:
+                policy=validate_policy(body['template_id'],body['operating_policy'])
+                result=plan(SERVICE.estimator,body['template_id'],body['estimate_hours'],policy)
+                result['budget_feasible']=policy['mode']!='AUTO_RENEW' or (result['approved'] and
+                    result['total_milliusd']<=policy['budget_limit_milliusd']<=SERVICE.budget and result['renewal_period']['total_milliusd']>0)
+            else:raise HubError('INVALID_INPUT','Tách khoảng dự toán và chính sách vận hành.')
         elif method == "POST" and path == "/environments":
             result, status = public(SERVICE.create(owner, key, body, admin)), 202
         elif method == "GET" and path in {"/environments", "/recovery-points"}:
@@ -107,7 +115,7 @@ def handler(event, context=None):
         elif method == "POST" and re.fullmatch(r"/environments/[a-z0-9-]+/(backup|destroy|audit|extend)", path):
             _, eid, action = path.strip("/").split("/")
             if action == "extend":
-                result = SERVICE.extend(owner, eid, key, body)
+                result,status = public(SERVICE.extend(owner, eid, key, body)),202
             else:
                 result, status = public(SERVICE.command(owner, eid, action, key, body)), 202
         else:

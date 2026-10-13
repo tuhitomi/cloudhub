@@ -8,7 +8,8 @@ export async function cognitoRequest(cfg, action, body){
     if(!response.ok){
       const code=(data.__type||'').split('#').pop();
       const messages={NotAuthorizedException:'Email hoặc mật khẩu không hợp lệ.',UserNotFoundException:'Email hoặc mật khẩu không hợp lệ.',InvalidPasswordException:'Mật khẩu cần ít nhất 12 ký tự, có chữ hoa, chữ thường, số và ký hiệu.',PasswordResetRequiredException:'Hãy dùng Quên mật khẩu để đặt lại mật khẩu.',UserNotConfirmedException:'Tài khoản cần được xác nhận trước khi đăng nhập.',CodeMismatchException:'Mã xác thực không đúng.',ExpiredCodeException:'Mã xác thực đã hết hạn.',TooManyRequestsException:'Có quá nhiều yêu cầu. Hãy thử lại sau.',InvalidParameterException:'Kiểm tra thông tin đăng nhập hoặc mã xác thực.'};
-      throw Error(messages[code]||'Không thực hiện được yêu cầu đăng nhập.');
+      const extra={UsernameExistsException:'Email này đã có tài khoản. Hãy đăng nhập hoặc dùng Quên mật khẩu.',LimitExceededException:'Đã đạt giới hạn gửi mã. Hãy thử lại sau.',CodeDeliveryFailureException:'Chưa gửi được email. Hãy thử gửi lại mã sau.'};
+      const error=Error(messages[code]||extra[code]||'Không thực hiện được yêu cầu tài khoản.');error.code=code;throw error;
     }
     return data;
   }catch(error){if(error.name==='AbortError'||error instanceof TypeError)throw Error('Không kết nối được hệ thống đăng nhập. Hãy thử lại.');throw error;}
@@ -34,7 +35,7 @@ export async function refreshCognito(cfg, token, previous){
   return normalizedTokens(cfg,await cognitoRequest(cfg,'InitiateAuth',{AuthFlow:'REFRESH_TOKEN_AUTH',ClientId:cfg.clientId,AuthParameters:{REFRESH_TOKEN:token}}),previous);
 }
 
-export function createCognitoAuth({cfg,onAuthenticated}){
+export function createCognitoAuth({cfg,onAuthenticated,onUnconfirmed=()=>{}}){
   const $=selector=>document.querySelector(selector);
   let challenge=null,username='',requesting=false;
   function clear(){challenge=null;username='';$('#login-form').reset();$('#login-new-fields').hidden=true;$('#login-code-fields').hidden=true;$('#login-password-fields').hidden=false;$('#login-password').required=true;$('#login-new-password').required=false;$('#login-code').required=false;$('#login-email').readOnly=false;$('#login-submit').textContent='Đăng nhập';}
@@ -46,7 +47,7 @@ export function createCognitoAuth({cfg,onAuthenticated}){
     event.preventDefault();if(requesting)return;requesting=true;$('#login-submit').disabled=true;$('#login-close').disabled=true;$('#login-notice').textContent='Đang xác thực…';
     try{
       let response;
-      if(!challenge){username=$('#login-email').value.trim();response=await cognitoRequest(cfg,'InitiateAuth',{ClientId:cfg.clientId,AuthFlow:'USER_PASSWORD_AUTH',AuthParameters:{USERNAME:username,PASSWORD:$('#login-password').value}});}
+      if(!challenge){username=$('#login-email').value.trim().toLowerCase();response=await cognitoRequest(cfg,'InitiateAuth',{ClientId:cfg.clientId,AuthFlow:'USER_PASSWORD_AUTH',AuthParameters:{USERNAME:username,PASSWORD:$('#login-password').value}});}
       else{
         const values={USERNAME:username};
         if(challenge.ChallengeName==='NEW_PASSWORD_REQUIRED')values.NEW_PASSWORD=$('#login-new-password').value;
@@ -59,8 +60,45 @@ export function createCognitoAuth({cfg,onAuthenticated}){
       challenge=response;username=response.ChallengeParameters?.USER_ID_FOR_SRP||username;
       const password=challenge.ChallengeName==='NEW_PASSWORD_REQUIRED';$('#login-password-fields').hidden=true;$('#login-password').required=false;$('#login-new-fields').hidden=!password;$('#login-new-password').required=password;$('#login-code-fields').hidden=password;$('#login-code').required=!password;$('#login-email').readOnly=true;
       $('#login-submit').textContent=password?'Đặt mật khẩu và đăng nhập':'Xác thực';$('#login-notice').textContent=password?'Đây là lần đăng nhập đầu. Hãy tự đặt mật khẩu mới.':'Nhập mã xác thực của tài khoản.';
-    }catch(error){$('#login-notice').textContent=error.message;}
+    }catch(error){$('#login-notice').textContent=error.message;if(error.code==='UserNotConfirmedException'){const pending=username;clear();$('#login-dialog').close();onUnconfirmed(pending);}}
     finally{$('#login-password').value='';$('#login-new-password').value='';$('#login-code').value='';requesting=false;$('#login-submit').disabled=false;$('#login-close').disabled=false;}
   };
   return {open};
+}
+
+export function createRegistration({cfg,onConfirmed}){
+  const $=s=>document.querySelector(s);
+  let email='',busy=false,resendAt=0;
+  function openVerification(value){email=value.trim().toLowerCase();$('#verification-email').value=email;$('#verification-code').value='';$('#verification-notice').textContent='Nhập mã xác thực được gửi đến email. Nếu chưa nhận hoặc mã hết hạn, hãy gửi lại mã.';$('#verification-dialog').showModal();}
+  function open(){if(!cfg.configured)throw Error('Chưa cấu hình đăng ký.');$('#signup-form').reset();$('#signup-notice').textContent='';$('#signup-dialog').showModal();}
+  function lock(value){busy=value;for(const id of ['signup-submit','signup-close','verification-submit','verification-close','verification-resend'])$('#'+id).disabled=value;}
+  function closeSignup(){if(busy)return;$('#signup-form').reset();$('#signup-dialog').close();}
+  function closeVerification(){if(busy)return;$('#verification-code').value='';$('#verification-dialog').close();}
+  $('#signup-close').onclick=closeSignup;$('#verification-close').onclick=closeVerification;
+  $('#signup-dialog').addEventListener('cancel',e=>{e.preventDefault();closeSignup();});
+  $('#verification-dialog').addEventListener('cancel',e=>{e.preventDefault();closeVerification();});
+  $('#signup-form').onsubmit=async e=>{
+    e.preventDefault();if(busy)return;lock(true);$('#signup-notice').textContent='Đang đăng ký…';
+    try{
+      if($('#signup-password').value!==$('#signup-password-confirm').value)throw Error('Hai mật khẩu chưa khớp.');
+      email=$('#signup-email').value.trim().toLowerCase();
+      const result=await cognitoRequest(cfg,'SignUp',{ClientId:cfg.clientId,Username:email,Password:$('#signup-password').value,UserAttributes:[{Name:'email',Value:email}]});
+      if(result.UserConfirmed)throw Error('Cấu hình xác thực email chưa đúng. Liên hệ quản trị.');
+      $('#signup-dialog').close();resendAt=Date.now()+60000;openVerification(email);
+    }catch(error){$('#signup-notice').textContent=error.message;}
+    finally{$('#signup-password').value='';$('#signup-password-confirm').value='';lock(false);}
+  };
+  $('#verification-form').onsubmit=async e=>{
+    e.preventDefault();if(busy)return;lock(true);$('#verification-notice').textContent='Đang xác thực…';
+    try{email=$('#verification-email').value.trim().toLowerCase();await cognitoRequest(cfg,'ConfirmSignUp',{ClientId:cfg.clientId,Username:email,ConfirmationCode:$('#verification-code').value.trim()});$('#verification-dialog').close();onConfirmed(email);}
+    catch(error){$('#verification-notice').textContent=error.message;}
+    finally{$('#verification-code').value='';lock(false);}
+  };
+  $('#verification-resend').onclick=async()=>{
+    if(busy)return;if(Date.now()<resendAt){$('#verification-notice').textContent='Chờ '+Math.ceil((resendAt-Date.now())/1000)+' giây trước khi gửi lại mã.';return;}
+    lock(true);
+    try{email=$('#verification-email').value.trim().toLowerCase();await cognitoRequest(cfg,'ResendConfirmationCode',{ClientId:cfg.clientId,Username:email});resendAt=Date.now()+60000;$('#verification-notice').textContent='Đã yêu cầu gửi mã mới. Kiểm tra hộp thư và thư rác.';}
+    catch(error){$('#verification-notice').textContent=error.message;}finally{lock(false);}
+  };
+  return {open,openVerification};
 }

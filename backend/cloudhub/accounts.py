@@ -14,6 +14,25 @@ class Accounts:
         self.pool=pool
         self.client=client or boto3.client('cognito-idp',config=Config(connect_timeout=.4,read_timeout=1,retries={'total_max_attempts':1}))
 
+    def identity(self, actor, username):
+        """Access JWTs omit email_verified: read current attributes from this pool."""
+        from botocore.exceptions import ClientError
+        if not username:
+            raise HubError('UNAUTHORIZED', 'Cần phiên Cognito hợp lệ.', 401)
+        try:
+            user=self.client.admin_get_user(UserPoolId=self.pool,Username=username)
+        except ClientError as exc:
+            if exc.response['Error']['Code'] in {'UserNotFoundException','NotAuthorizedException'}:
+                raise HubError('UNAUTHORIZED', 'Phiên tài khoản không còn hợp lệ.', 401) from None
+            raise
+        result=self.public(user)
+        if result['owner_id']!=actor:
+            raise HubError('UNAUTHORIZED', 'Định danh Cognito không khớp.', 401)
+        if not result['enabled']:
+            raise HubError('ACCOUNT_DISABLED', 'Tài khoản đã bị khóa.', 403)
+        result['email_verified']=result['email_verified'] and result['status']=='CONFIRMED'
+        return result
+
     def assert_admin(self, actor, username):
         if not username:raise HubError('FORBIDDEN','Cần phiên quản trị hợp lệ.',403)
         user=self.client.admin_get_user(UserPoolId=self.pool,Username=username)

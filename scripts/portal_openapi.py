@@ -6,6 +6,9 @@ def extend(paths,schemas,operation,param,ref):
     schemas.update({
         'Limits':obj({**{k:integer for k in ['active','max_active','remaining_environments','user_reserved_milliusd','user_budget_milliusd','remaining_milliusd','global_remaining_environments','global_remaining_milliusd']},'budget_method':{'type':'string'}}),
         'QuotaInput':obj({'max_active':integer,'budget_milliusd':integer}),
+        'OwnAccount':{'type':'object','required':['owner_id','email','email_verified','role'],'properties':{
+            'owner_id':{'type':'string'},'email':{'type':'string','format':'email'},'email_verified':{'type':'boolean'},
+            'role':{'type':'string','description':'Server-owned profile role; never accepted from signup.'},'limits':ref('Limits')}},
         'InviteInput':obj({'email':{'type':'string','format':'email','maxLength':254},'send_invitation':{'type':'boolean','enum':[True]}}),
         'EnabledInput':obj({'enabled':{'type':'boolean'}}),
         'RetireInput':obj({'reason':{'type':'string','minLength':10,'maxLength':500}}),
@@ -27,6 +30,9 @@ def extend(paths,schemas,operation,param,ref):
         'OperationList':{'type':'object','required':['items'],'properties':{'items':{'type':'array','items':ref('Operation')}}}
     })
     endpoints=[
+        ('/account','get','getOwnAccount',None,[],'200','OwnAccount',False),
+        ('/admin/signup-defaults','get','getSignupDefaults',None,[],'200','QuotaInput',False),
+        ('/admin/signup-defaults','post','setSignupDefaults','QuotaInput',[],'200','QuotaInput',False),
         ('/limits','get','getLimits',None,[],'200','Limits',False),
         ('/notifications','get','expiryNotifications',None,[],'200','NotificationList',False),
         ('/operations','get','operationHistory',None,[],'200','OperationList',False),
@@ -51,7 +57,7 @@ def extend(paths,schemas,operation,param,ref):
         paths.setdefault(path,{})[method]=operation(opid,method,body,params,status,result,idem)
     for path,methods in paths.items():
         for op in methods.values():
-            op['responses']['403']={'description':'Account disabled or current admin role required','content':{'application/json':{'schema':ref('Error')}}}
+            op['responses']['403']={'description':'Email unverified, account disabled or current admin role required','content':{'application/json':{'schema':ref('Error')}}}
             if path.startswith('/admin/'):
                 op['description']='Admin JWT and enabled Cognito account with current admin group membership required.'
     paths['/admin/users']['post']['responses']['200']={'description':'Existing account; invitation is never resent automatically','content':{'application/json':{'schema':ref('Account')}}}

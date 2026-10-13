@@ -18,7 +18,12 @@ def extend(params, resources, common, policy, ref, sub, att):
         'Properties':{'TopicArn':ref('AlertTopic'),'Protocol':'email','Endpoint':ref('AlertEmail')}}
     userpool=resources['UserPool']['Properties']
     userpool['AccountRecoverySetting']={'RecoveryMechanisms':[{'Name':'verified_email','Priority':1}]}
+    userpool['AdminCreateUserConfig']={'AllowAdminCreateUserOnly':False}
+    userpool['UserAttributeUpdateSettings']={'AttributesRequireVerificationBeforeUpdate':['email']}
+    userpool['VerificationMessageTemplate']={'DefaultEmailOption':'CONFIRM_WITH_CODE','EmailSubject':'Mã xác thực tài khoản CloudHub','EmailMessage':'Mã xác thực tài khoản CloudHub của bạn là {####}.'}
     client=resources['UserClient']['Properties']
+    client['ReadAttributes']=['sub','email','email_verified']
+    client['WriteAttributes']=['email']
     client['ExplicitAuthFlows']=['ALLOW_USER_PASSWORD_AUTH','ALLOW_USER_SRP_AUTH','ALLOW_REFRESH_TOKEN_AUTH']
     client['AllowedOAuthScopes'].append('aws.cognito.signin.user.admin')
     resources['HttpApi']['Properties']['Auth']['Authorizers']['CognitoJwt']['AuthorizationScopes']=['cloudhub/use','aws.cognito.signin.user.admin']
@@ -30,7 +35,8 @@ def extend(params, resources, common, policy, ref, sub, att):
         ('GET','/environments/{environment_id}/cost'),('POST','/environments/{environment_id}/cost'),
         ('GET','/admin/environments'),('GET','/admin/operations/{operation_id}'),
         ('GET','/admin/users'),('POST','/admin/users'),('POST','/admin/users/{owner_id}/{control}'),
-        ('POST','/admin/environments/{environment_id}/retire'),('GET','/admin/notifications'),('POST','/admin/notifications/test')]
+        ('POST','/admin/environments/{environment_id}/retire'),('GET','/admin/notifications'),('POST','/admin/notifications/test'),
+        ('GET','/account'),('GET','/admin/signup-defaults'),('POST','/admin/signup-defaults')]
     for index,(method,path) in enumerate(routes):
         events['PortalRoute'+str(index)]={'Type':'HttpApi','Properties':{'ApiId':ref('HttpApi'),'Method':method,'Path':path}}
     return {'HasAlertEmail':{'Fn::Not':[{'Fn::Equals':[ref('AlertEmail'),'']}]},'CostsEnabled':{'Fn::Equals':[ref('ActualCostsEnabled'),'true']}}

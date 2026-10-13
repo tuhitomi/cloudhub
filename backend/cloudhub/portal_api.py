@@ -12,6 +12,10 @@ def route(service, method, path, body, key, owner, admin, claims, query, public)
         accounts=Accounts(os.environ['USER_POOL_ID'])
         accounts.assert_admin(owner,claims.get('username'))
     if method=='GET' and path=='/limits':return service.limits(owner),200
+    if path=='/admin/signup-defaults':
+        from .registration import defaults, set_defaults
+        if method=='GET':return defaults(service),200
+        if method=='POST':return set_defaults(service,owner,body),200
     if method=='GET' and path=='/notifications':return service.notifications(owner),200
     if method=='GET' and path=='/operations':
         return {'items':[public(o) for o in sorted(service.store.list_owner(owner,'operation'),key=lambda o:o.get('created_at',0),reverse=True)[:100]]},200

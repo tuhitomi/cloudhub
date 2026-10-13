@@ -2,7 +2,8 @@
 import base64
 import hashlib
 import io
-import json
+import json,os
+from unittest.mock import patch
 import sys
 import unittest
 from copy import deepcopy
@@ -246,7 +247,10 @@ class S3Tests(unittest.TestCase):
         self.assertFalse(Estimator(bad).estimate('T02',1)['approved'])
         self.assertFalse(Estimator(RATES).estimate('T01',1)['approved'])
         with self.assertRaises(HubError):self.s.create('alice','wrong_config',{'template_id':'T02','duration_hours':1,'configuration':{'instance_type':'t3.micro','root_gib':16,'data_gib':8}})
-    def test_api_file_command_returns_202_without_payload_and_enforces_gate(self):
+    @patch.dict(os.environ, {"USER_POOL_ID":"test-pool"})
+    @patch("cloudhub.accounts.Accounts", autospec=True)
+    def test_api_file_command_returns_202_without_payload_and_enforces_gate(self, accounts):
+        accounts.return_value.identity.return_value={"owner_id":"alice","email":"alice@example.com","email_verified":True}
         env,_=self.ready();old=api.SERVICE,api.DISPATCH;api.SERVICE=self.s;api.DISPATCH=lambda oid:None
         event={'requestContext':{'authorizer':{'jwt':{'claims':{'sub':'alice','token_use':'access'}}},'http':{'method':'POST'}},
             'rawPath':'/environments/'+env['environment_id']+'/files','headers':{'Idempotency-Key':'api_file_request'},'body':json.dumps(self.payload())}

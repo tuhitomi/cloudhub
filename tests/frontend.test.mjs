@@ -14,7 +14,7 @@ function setup(groups=[]){
   for(const select of document.querySelectorAll('select'))Object.defineProperty(select,'value',{writable:true,value:select.querySelector('option')?.getAttribute('value')||''});
   for(const dialog of document.querySelectorAll('dialog')){dialog.showModal=()=>dialog.setAttribute('open','');dialog.close=()=>dialog.removeAttribute('open');}
   for(const form of document.querySelectorAll('form'))form.reset=()=>{for(const field of form.querySelectorAll('input')){field.value='';field.checked=false;}};
-  const responses=new Map([['/limits',quota],['/notifications',{items:[]}],['/operations',{items:[]}],['/admin/environments',{items:[]}],['/admin/users',{items:[],next_cursor:null}],['/admin/notifications',{status:'NOT_CONFIGURED',email:''}]]),calls=[];
+  const responses=new Map([['/limits',quota],['/notifications',{items:[]}],['/operations',{items:[]}],['/admin/environments',{items:[]}],['/admin/users',{items:[],next_cursor:null}],['/admin/notifications',{status:'NOT_CONFIGURED',email:''}],['/admin/signup-defaults',{max_active:2,budget_milliusd:10000}]]),calls=[];
   const element=(tag,text,cls)=>{const value=document.createElement(tag);if(text!==undefined)value.textContent=text;if(cls)value.className=cls;return value;};
   const button=(text,fn,disabled=false)=>{const value=element('button',text);value.disabled=disabled;value.addEventListener('click',()=>Promise.resolve(fn()).catch(error=>document.querySelector('#notice').textContent=error.message));return value;};
   const api=async path=>{calls.push(path);if(!responses.has(path))throw Error('Unexpected endpoint '+path);return responses.get(path);};
@@ -68,10 +68,19 @@ test('forgot/reset uses confirmation code and clears new password after success'
   $('#forgot-email').value='student@example.com';$('#reset-code').value='123456';$('#reset-password').value='NewPassword123!';$('#reset-form').onsubmit({preventDefault(){},currentTarget:$('#reset-form')});await flush();
   assert.equal(requests[0].ConfirmationCode,'123456');assert.equal(requests[0].Username,'student@example.com');assert.equal($('#reset-password').value,'');assert.match($('#password-notice').textContent,/Đã đặt mật khẩu/);
 });
+
+for(const [code,expected] of [['CodeMismatchException',/không đúng/],['ExpiredCodeException',/hết hạn/]]){
+  test('password reset '+code+' retains reset screen and clears the rejected password',async()=>{
+    const {$}=setup();$('#forgot-email').value='student@example.com';$('#reset-form').hidden=false;$('#reset-code').value='000000';$('#reset-password').value='OnlyLocalTest123!';
+    globalThis.fetch=async()=>({ok:false,json:async()=>({__type:code})});
+    $('#reset-form').onsubmit({preventDefault(){},currentTarget:$('#reset-form')});await flush();
+    assert.match($('#password-notice').textContent,expected);assert.equal($('#reset-password').value,'');assert.equal($('#reset-form').hidden,false);
+  });
+}
 test('complete app starts with real HTML and mocked owned API, with no browser automation',async()=>{
   const {context,$}=setup();window.CLOUDHUB=context.cfg;const storage=new Map([['cloudhub_access_token',token([])]]);globalThis.sessionStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key),clear:()=>storage.clear()};
   globalThis.location={search:'',pathname:'/',assign(){}};globalThis.history={replaceState(){}};
-  const values={'/templates':{items:[]},'/environments':{items:[]},'/recovery-points':{items:[]},'/limits':quota,'/notifications':{items:[]},'/operations':{items:[]}};
+  const values={'/account':{email_verified:true,role:'user'},'/templates':{items:[]},'/environments':{items:[]},'/recovery-points':{items:[]},'/limits':quota,'/notifications':{items:[]},'/operations':{items:[]}};
   globalThis.fetch=async url=>{const path=new URL(url).pathname;assert.ok(values[path],'unexpected '+path);return {ok:true,json:async()=>values[path]};};window.CLOUDHUB.apiBase='https://api.example';
   const timer=globalThis.setInterval;globalThis.setInterval=()=>1;
   try{const auth=await readFile(new URL('../frontend/auth.js',import.meta.url),'utf8');const app=(await readFile(new URL('../frontend/app.js',import.meta.url),'utf8')).replace("'./portal.js'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(source).toString('base64'))).replace("'./auth.js'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(auth).toString('base64')));await import('data:text/javascript;base64,'+Buffer.from(app).toString('base64'));await flush();assert.match($('#limits-summary').textContent,/Còn 1 môi trường/);assert.equal($('#logout').hidden,false);assert.equal($('#admin').hidden,true);assert.match($('#notice').textContent,/Đã đăng nhập/);}finally{globalThis.setInterval=timer;}

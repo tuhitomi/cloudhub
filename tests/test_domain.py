@@ -1,5 +1,6 @@
 """Risk tests only. These are LOCAL MOCK results, never AWS evidence."""
-import json
+import json,os
+from unittest.mock import patch
 import sys
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -164,7 +165,10 @@ class DomainTests(unittest.TestCase):
         self.s.command=interleaved
         self.assertIsNone(self.s.expire(env['environment_id']))
         self.assertEqual(self.store.get(env['pk'])['status'],'READY')
-    def test_api_202_and_unified_error_and_auth(self):
+    @patch.dict(os.environ, {"USER_POOL_ID":"test-pool"})
+    @patch("cloudhub.accounts.Accounts", autospec=True)
+    def test_api_202_and_unified_error_and_auth(self, accounts):
+        accounts.return_value.identity.return_value={"owner_id":"alice","email":"alice@example.com","email_verified":True}
         api.SERVICE=self.s;api.DISPATCH=None
         event={'rawPath':'/environments','headers':{'Idempotency-Key':'apirequest'},'body':json.dumps({'template_id':'T01','duration_hours':1}),
                'requestContext':{'requestId':'req','http':{'method':'POST'},'authorizer':{'jwt':{'claims':{'sub':'alice','token_use':'access'}}}}}

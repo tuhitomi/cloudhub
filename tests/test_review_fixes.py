@@ -173,25 +173,29 @@ class ValidationAuthorizationTests(unittest.TestCase):
 
     def test_removed_admin_jwt_cannot_create_validation_environment(self):
         with patch('cloudhub.accounts.Accounts', autospec=True) as accounts:
+            accounts.return_value.identity.return_value={'owner_id':'alice','email':'alice@example.com','email_verified':True}
             accounts.return_value.assert_admin.side_effect = HubError('FORBIDDEN', 'removed', 403)
             self.assertEqual(api.handler(self.event())['statusCode'], 403)
             accounts.return_value.assert_admin.assert_called_once_with('alice', 'alice')
-        self.assertIsNone(self.service.store.get('Q#alice'))
+        self.assertEqual(self.service.store.get('Q#alice')['active'],0)
 
     def test_current_admin_can_create_validation_environment(self):
         with patch('cloudhub.accounts.Accounts', autospec=True) as accounts:
+            accounts.return_value.identity.return_value={'owner_id':'alice','email':'alice@example.com','email_verified':True}
             self.assertEqual(api.handler(self.event())['statusCode'], 202)
             accounts.return_value.assert_admin.assert_called_once_with('alice', 'alice')
 
     def test_normal_create_does_not_require_admin_lookup(self):
         with patch('cloudhub.accounts.Accounts', autospec=True) as accounts:
+            accounts.return_value.identity.return_value={'owner_id':'alice','email':'alice@example.com','email_verified':True}
             self.assertEqual(api.handler(self.event(validation=False, admin=False))['statusCode'], 202)
-            accounts.assert_not_called()
+            accounts.return_value.assert_admin.assert_not_called()
 
     def test_non_admin_validation_is_denied_before_provider_lookup(self):
         with patch('cloudhub.accounts.Accounts', autospec=True) as accounts:
+            accounts.return_value.identity.return_value={'owner_id':'alice','email':'alice@example.com','email_verified':True}
             self.assertEqual(api.handler(self.event(admin=False))['statusCode'], 403)
-            accounts.assert_not_called()
+            accounts.return_value.assert_admin.assert_not_called()
 
 
 class DataApiAccountTests(unittest.TestCase):

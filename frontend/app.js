@@ -1,7 +1,8 @@
 import {createPortal} from './portal.js';
-import {createCognitoAuth,refreshCognito,cognitoRequest} from './auth.js';
+import {createCognitoAuth,createRegistration,refreshCognito,cognitoRequest} from './auth.js';
 const $ = s => document.querySelector(s);
 const cfg = window.CLOUDHUB || {};
+let emailVerified=false;
 let accessToken = sessionStorage.getItem('cloudhub_access_token');
 let refreshToken=sessionStorage.getItem('cloudhub_refresh_token'),refreshPromise;
 let selected, recoveryPoint, latestQuote, busy = false, quoteSerial = 0;
@@ -113,12 +114,14 @@ $('#record-close').onclick=()=>$('#records-dialog').close();
 $('#file-form').onsubmit=ev=>submitFile(ev).catch(showError);
 $('#file-close').onclick=()=>$('#files-dialog').close();
 $('#file-input').onchange=()=>{const file=$('#file-input').files[0];if(file)$('#file-key').value=file.name;};
-const authentication=createCognitoAuth({cfg,onAuthenticated:async tokens=>{accessToken=tokens.access_token;refreshToken=tokens.refresh_token;sessionStorage.setItem('cloudhub_access_token',accessToken);sessionStorage.setItem('cloudhub_auth_method','api');if(refreshToken)sessionStorage.setItem('cloudhub_refresh_token',refreshToken);await start();}});
+const authentication=createCognitoAuth({cfg,onUnconfirmed:email=>registration.openVerification(email),onAuthenticated:async tokens=>{accessToken=tokens.access_token;refreshToken=tokens.refresh_token;sessionStorage.setItem('cloudhub_access_token',accessToken);sessionStorage.setItem('cloudhub_auth_method','api');if(refreshToken)sessionStorage.setItem('cloudhub_refresh_token',refreshToken);await start();}});
+const registration=createRegistration({cfg,onConfirmed:email=>{notice('Email đã xác thực. Hãy đăng nhập bằng mật khẩu của bạn.');authentication.open();$('#login-email').value=email;}});
+$('#signup').onclick=()=>{try{registration.open();}catch(error){showError(error);}};
 $('#login').onclick=()=>login().catch(showError);$('#logout').onclick=()=>logout().catch(showError);$('#refresh').onclick=()=>refresh().catch(showError);$('#cancel').onclick=()=>$('#create-dialog').close();$('#hours').onchange=()=>updateQuote().catch(showError);$('#create-form').onsubmit=submitCreate;
-async function start(){await callback();$('#login').hidden=!!accessToken;$('#logout').hidden=!accessToken;if(!cfg.configured){notice('Chưa triển khai AWS. Cấu hình và minh chứng thật đang chờ xác nhận.');return;}if(!accessToken){notice('Đăng nhập để xem danh mục và quản lý môi trường.');return;}notice('Đã đăng nhập. Chỉ mẫu đã kiểm chứng mới cho phép tạo.');await Promise.all([loadCatalog(),refresh()]);if(portal.isAdmin())await portal.loadAdmin();}
-setInterval(async()=>{if(!accessToken||document.hidden)return;try{for(const [id,op]of operations){if(!['SUCCEEDED','FAILED','CANCELLED'].includes(op.status))operations.set(id,await api(op.admin_actor&&portal.isAdmin()?'/admin/operations/'+id:'/operations/'+id));}renderOperations();await refresh();}catch(e){showError(e);}},10000);
+async function start(){await callback();$('#login').hidden=!!accessToken;$('#signup').hidden=!!accessToken;$('#logout').hidden=!accessToken;if(!cfg.configured){notice('Chưa triển khai AWS. Cấu hình và minh chứng thật đang chờ xác nhận.');return;}if(!accessToken){notice('Đăng nhập để xem danh mục và quản lý môi trường.');return;}const account=await api('/account');emailVerified=account.email_verified===true;if(!emailVerified){notice('Xác thực email trước khi quản lý môi trường. Mở Tài khoản để gửi và nhập mã xác thực.');$('#account-settings').hidden=false;return;}notice('Đã đăng nhập. Chỉ mẫu đã kiểm chứng mới cho phép tạo.');await Promise.all([loadCatalog(),refresh()]);if(portal.isAdmin())await portal.loadAdmin();}
+setInterval(async()=>{if(!accessToken||!emailVerified||document.hidden)return;try{for(const [id,op]of operations){if(!['SUCCEEDED','FAILED','CANCELLED'].includes(op.status))operations.set(id,await api(op.admin_actor&&portal.isAdmin()?'/admin/operations/'+id:'/operations/'+id));}renderOperations();await refresh();}catch(e){showError(e);}},10000);
 async function mutate(path,body={}){const scope=path+'/'+JSON.stringify(body),result=await post(path,body,idempotency(scope));commands.delete(scope);return result;}
-const portal=createPortal({api,post,notice,element,button,timestamp,track,refresh,operations,renderOperations,cfg,getToken:()=>accessToken,ensureToken,mutate});
+const portal=createPortal({api,post,notice,element,button,timestamp,track,refresh,operations,renderOperations,cfg,getToken:()=>accessToken,ensureToken,mutate,onEmailVerified:start});
 for(const id of ['environment-search','environment-status','environment-template'])$('#'+id).addEventListener(id==='environment-search'?'input':'change',renderEnvironments);
 start().catch(showError);
 

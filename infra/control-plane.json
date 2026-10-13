@@ -310,7 +310,7 @@
           "email"
         ],
         "AdminCreateUserConfig": {
-          "AllowAdminCreateUserOnly": true
+          "AllowAdminCreateUserOnly": false
         },
         "Policies": {
           "PasswordPolicy": {
@@ -328,6 +328,16 @@
               "Priority": 1
             }
           ]
+        },
+        "UserAttributeUpdateSettings": {
+          "AttributesRequireVerificationBeforeUpdate": [
+            "email"
+          ]
+        },
+        "VerificationMessageTemplate": {
+          "DefaultEmailOption": "CONFIRM_WITH_CODE",
+          "EmailSubject": "Mã xác thực tài khoản CloudHub",
+          "EmailMessage": "Mã xác thực tài khoản CloudHub của bạn là {####}."
         }
       }
     },
@@ -394,6 +404,14 @@
           "AccessToken": "minutes",
           "RefreshToken": "days"
         },
+        "ReadAttributes": [
+          "sub",
+          "email",
+          "email_verified"
+        ],
+        "WriteAttributes": [
+          "email"
+        ],
         "ExplicitAuthFlows": [
           "ALLOW_USER_PASSWORD_AUTH",
           "ALLOW_USER_SRP_AUTH",
@@ -2052,6 +2070,36 @@
               },
               "Method": "POST",
               "Path": "/admin/notifications/test"
+            }
+          },
+          "PortalRoute16": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/account"
+            }
+          },
+          "PortalRoute17": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "GET",
+              "Path": "/admin/signup-defaults"
+            }
+          },
+          "PortalRoute18": {
+            "Type": "HttpApi",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "Method": "POST",
+              "Path": "/admin/signup-defaults"
             }
           }
         }

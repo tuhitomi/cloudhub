@@ -45,6 +45,13 @@ def handler(event, context=None):
             raise HubError('ACCOUNT_DISABLED','Tài khoản đã bị khóa.',403)
         method = event["requestContext"]["http"]["method"]
         path = event.get("rawPath", "/")
+        from .accounts import Accounts
+        from .registration import ensure_profile
+        identity = Accounts(os.environ['USER_POOL_ID']).identity(owner, claims.get('username'))
+        if not identity['email_verified'] and not (method == 'GET' and path == '/account'):
+            raise HubError('EMAIL_NOT_VERIFIED', 'Xác thực email trước khi quản lý môi trường.', 403)
+        profile = ensure_profile(SERVICE, identity) if identity['email_verified'] else {
+            'owner_id': owner, 'email': identity['email'], 'email_verified': False, 'role': 'user'}
         headers = {k.lower(): v for k, v in event.get("headers", {}).items()}
         raw = event.get("body") or "{}"
         if event.get("isBase64Encoded"):
@@ -58,7 +65,9 @@ def handler(event, context=None):
         status = 200
         from .portal_api import route, UNHANDLED
         extra = route(SERVICE,method,path,body,key,owner,admin,claims,event.get('queryStringParameters') or {},public)
-        if extra is not UNHANDLED:
+        if method == 'GET' and path == '/account':
+            result = profile
+        elif extra is not UNHANDLED:
             result,status=extra
         elif method == "GET" and path == "/templates":
             result = {"items": catalog(SERVICE.verified)}

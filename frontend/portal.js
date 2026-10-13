@@ -31,7 +31,9 @@ export function createPortal(ctx) {
     card.append(button('Xóa bản sao',()=>action('Xóa bản sao','Xóa dữ liệu được bảo vệ bởi bản sao '+rp.recovery_point+'. Thao tác này không thể hoàn tác; môi trường nguồn vẫn được giữ.',[],async()=>{track(await mutate('/recovery-points/'+rp.recovery_point+'/delete'));await refresh();}),busy||!!rp.retirement_protected||!['AVAILABLE','DELETE_FAILED'].includes(rp.status)));
     if(rp.retirement_protected)card.append(element('small','Bản sao cuối cùng được bảo vệ đến khi xác nhận thu hồi sạch môi trường.'));}
   function operationExtras(card,op){if(op.status==='FAILED'&&!op.admin_actor){
-    card.append(button('Thử lại',async()=>{track(await mutate('/operations/'+op.operation_id+'/retry'));await refresh();},!retryPhases.has(op.failed_phase||op.phase)||Number(op.manual_retries||0)>=3));
+    const phase=op.failed_phase||op.phase,env=allEnvironments.find(e=>e.environment_id===op.environment_id);
+    const constructionRetry=op.action==='create'&&['CREATE','WAIT_CREATE'].includes(phase)&&['T03','T04','T06','T08','T09'].includes(env?.template_id);
+    card.append(button('Thử lại',async()=>{track(await mutate('/operations/'+op.operation_id+'/retry'));await refresh();},!(retryPhases.has(phase)||constructionRetry)||Number(op.manual_retries||0)>=3));
     card.append(button('Đóng tác vụ lỗi',()=>action('Đóng tác vụ lỗi','Giữ nguyên tài nguyên và dữ liệu. Đây là đóng thông báo tác vụ; muốn xóa tài nguyên hãy dùng Sao lưu và thu hồi.',[],async()=>{const result=await mutate('/operations/'+op.operation_id+'/cancel');operations.set(op.operation_id,result);renderOperations();await refresh();})));}
     if(op.status==='SUCCEEDED'&&op.action==='export_backup')card.append(button(op.result?.label||'Tải bản sao',async()=>{const result=await api('/operations/'+op.operation_id+'/download');const link=element('a',result.label);link.href=result.url;link.target='_blank';link.rel='noopener noreferrer';card.append(link);notice('Liên kết tải hết hạn: '+timestamp(result.expires_at));}));
     if(op.status==='CANCELLED')card.append(element('p',op.cancel_note||'Đã đóng tác vụ lỗi.'));

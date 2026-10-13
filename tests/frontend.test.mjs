@@ -45,6 +45,13 @@ test('failed provisioning cannot retry; cancelling and native export have separa
   const {portal,element}=setup();const card=element('article');portal.operationExtras(card,{operation_id:'op-id',status:'FAILED',phase:'CREATE'});
   const buttons=card.querySelectorAll('button');assert.equal(buttons[0].disabled,true);assert.equal(buttons[1].textContent,'Đóng tác vụ lỗi');
 });
+test('owned EFS construction retry is shown only for supported create operations',()=>{
+  const {portal,element}=setup();portal.renderHistory([{environment_id:'env-efs',template_id:'T08',status:'CREATE_FAILED'}]);
+  for(const [action,disabled] of [['create',false],['restore',true]]){
+    const card=element('article');portal.operationExtras(card,{operation_id:'op-efs',environment_id:'env-efs',action,status:'FAILED',failed_phase:'WAIT_CREATE'});
+    assert.equal(card.querySelector('button').disabled,disabled);
+  }
+});
 test('admin visibility uses exact group and pending SNS confirmation keeps test disabled',async()=>{
   const bad=setup('notadmin');assert.equal(bad.portal.isAdmin(),false);
   const {portal,responses,$}=setup(['admin']);responses.set('/admin/notifications',{status:'PENDING_CONFIRMATION',email:'admin@example.com'});

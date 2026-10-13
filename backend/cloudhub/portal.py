@@ -77,7 +77,11 @@ class PortalMixin:
                 op.update(status='CANCELLED',cancelled_at=int(self.clock()),cancel_note='Đóng tác vụ lỗi; giữ nguyên dữ liệu và tài nguyên. Thu hồi là thao tác riêng.')
             else:
                 phase=op.get('failed_phase',op['phase'])
-                if phase not in RETRY_PHASES or op.get('manual_retries',0)>=3:
+                construction_retry=(phase in {'CREATE','WAIT_CREATE'} and op['action']=='create'
+                        and env['template_id'] in {'T03','T04','T06','T08','T09'})
+                if construction_retry:
+                    phase='CREATE'
+                if (phase not in RETRY_PHASES and not construction_retry) or op.get('manual_retries',0)>=3:
                     raise HubError('RETRY_UNAVAILABLE','Không thể thử lại bước này. Kiểm tra/thu hồi nguồn trước khi tạo mới, hoặc đã đạt 3 lần thử.',409)
                 rp=self.store.get('R#'+op['recovery_point']) if op.get('recovery_point') else None
                 if op['action'] in {'delete_backup','export_backup'}:

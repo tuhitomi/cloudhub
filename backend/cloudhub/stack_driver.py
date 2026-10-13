@@ -18,7 +18,16 @@ class StackDriver(AWSDriver):
             self.clients[key]=boto3.client(key,config=Config(connect_timeout=2,read_timeout=5,retries={'total_max_attempts':2}))
         return self.clients[key]
     def create(self,env,op,recovery):
-        if self.assert_stack(env):return
+        existing=self.assert_stack(env)
+        if existing:
+            if existing['StackStatus'] in {'CREATE_FAILED','UPDATE_FAILED'}:
+                # Retry only the saved template on this exact owned stack.
+                # Preserve successful resources and data if another step fails.
+                self.cloudformation.update_stack(StackName=self.stack_name(env),UsePreviousTemplate=True,
+                    DisableRollback=True,Capabilities=['CAPABILITY_NAMED_IAM'],
+                    ClientRequestToken=op['operation_id']+'-g'+str(op.get('generation',0)),
+                    RoleARN=self.settings['cf_role_arn'])
+            return
         self.cloudformation.create_stack(StackName=self.stack_name(env),TemplateBody=json.dumps(self.build_template(env,recovery)),
             Capabilities=['CAPABILITY_NAMED_IAM'],ClientRequestToken=op['operation_id'],OnFailure='DO_NOTHING',RoleARN=self.settings['cf_role_arn'],
             Tags=[{'Key':'cloudhub:environment','Value':env['environment_id']},{'Key':'cloudhub:owner','Value':env['owner_id']}])
@@ -26,8 +35,8 @@ class StackDriver(AWSDriver):
         stack=self.assert_stack(env)
         if not stack:raise RuntimeError('Stack missing during create')
         self.inventory(env)
-        if stack['StackStatus'] in {'CREATE_FAILED','ROLLBACK_FAILED','ROLLBACK_COMPLETE'}:raise HubError('CREATE_FAILED',stack.get('StackStatusReason',stack['StackStatus']),409)
-        if stack['StackStatus']!='CREATE_COMPLETE':return False
+        if stack['StackStatus'] in {'CREATE_FAILED','UPDATE_FAILED','ROLLBACK_FAILED','ROLLBACK_COMPLETE'}:raise HubError('CREATE_FAILED',stack.get('StackStatusReason',stack['StackStatus']),409)
+        if stack['StackStatus'] not in {'CREATE_COMPLETE','UPDATE_COMPLETE'}:return False
         env['outputs']={v['OutputKey']:v['OutputValue'] for v in stack.get('Outputs',[])}
         self.apply_outputs(env)
         return True

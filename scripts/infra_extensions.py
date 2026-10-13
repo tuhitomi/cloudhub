@@ -69,7 +69,20 @@ def extend(params,r,settings,cf,worker):
     # ALB validates security-group/VPC associations through this metadata API.
     cf.append(policy('ec2:GetSecurityGroupsForVpc',
         sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}'),region))
+    # EFS creates requester-managed ENIs. New ENIs have no resource tags yet;
+    # authorization also requires the two exact approved subnet ARNs.
+    cf.append(policy('ec2:CreateNetworkInterface',[
+        arn('ec2','network-interface/*'),arn('ec2','security-group/*'),
+        sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnetId}'),
+        sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnet2Id}')],region))
+    cf.append(policy('ec2:DeleteNetworkInterface',arn('ec2','network-interface/*'),{
+        'StringEquals':{'aws:RequestedRegion':ref('AWS::Region')},
+        'ArnEquals':{'ec2:Vpc':sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}'),
+            'ec2:Subnet':[
+            sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnetId}'),
+            sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnet2Id}')]}}))
     worker.extend([
+        policy('cloudformation:UpdateStack',arn('cloudformation','stack/cloudhub-env-*/*')),
         policy(['rds:DescribeDBInstances','rds:DescribeDBSnapshots','rds:DescribeDBSubnetGroups'],condition=region),
         policy(['rds:CreateDBSnapshot','rds:DeleteDBSnapshot','rds:AddTagsToResource','rds:ListTagsForResource'],[rds_db,rds_snap]),
         policy(['autoscaling:DescribeAutoScalingGroups','autoscaling:DescribePolicies','elasticloadbalancing:Describe*'],condition=region),

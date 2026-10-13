@@ -1494,6 +1494,58 @@
                   }
                 }
               }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "ec2:CreateNetworkInterface",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnetId}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnet2Id}"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "ec2:DeleteNetworkInterface",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                },
+                "ArnEquals": {
+                  "ec2:Vpc": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}"
+                  },
+                  "ec2:Subnet": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnetId}"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnet2Id}"
+                    }
+                  ]
+                }
+              }
             }
           ]
         }
@@ -2298,6 +2350,13 @@
               },
               {
                 "Effect": "Allow",
+                "Action": "cloudformation:UpdateStack",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/cloudhub-env-*/*"
+                }
+              },
+              {
+                "Effect": "Allow",
                 "Action": [
                   "rds:DescribeDBInstances",
                   "rds:DescribeDBSnapshots",
@@ -3039,6 +3098,13 @@
                 "Action": "cloudfront:GetOriginAccessControl",
                 "Resource": {
                   "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*"
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudformation:UpdateStack",
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/cloudhub-env-*/*"
                 }
               },
               {

@@ -4,6 +4,8 @@ Kiểm thử T08 ngày 13/10/2026 tạo được filesystem mã hóa, nhưng hai
 
 EFS cần `ec2:CreateNetworkInterface` khi tạo mount target, và `ec2:DeleteNetworkInterface` khi thu hồi. Quyền tạo chỉ nằm trên deployment role, trong account/region hiện hành và hai subnet đã duyệt. Quyền xóa giới hạn cả VPC và hai subnet đó. NFS vẫn chỉ nhận traffic từ security group của hai máy trong cùng môi trường; quyền của các máy và boundary của sinh viên được giữ.
 
+Lần thu hồi thật cho thấy CloudFormation cũng cần `elasticfilesystem:DescribeReplicationConfigurations`. Bổ sung chỉ quyền đọc metadata trên filesystem của account/region đã duyệt; không cấp tạo hoặc xóa replication.
+
 Thao tác thử lại lần tạo cho T03/T04/T06/T08/T09 dùng chính stack có tag owner/environment đã kiểm tra. Stack mới được tạo bằng `DisableRollback=true`; CloudFormation dùng template đã lưu và cùng role khi thử lại, không nhận template người dùng. Stack đã hoàn thành cập nhật vẫn phải qua kiểm tra dữ liệu và readiness trước khi bắt đầu phiên. Khóa, workflow generation và giới hạn ba lần thử lại tiếp tục áp dụng. Các bước CREATE của restore và các mẫu khác vẫn bị từ chối.
 
 AWS thực tế từ chối `UpdateStack` đối với fixture cũ tạo bằng `OnFailure=DO_NOTHING`, dù cách đó cũng giữ tài nguyên khi thất bại. Backend từ chối rõ ràng trường hợp cũ này và giữ nguồn. Quản trị phải bảo vệ filesystem bằng bản sao AWS Backup thật trước khi thu hồi phần tạo dở; vòng thất bại và bản sao vận hành đó không được tính là vòng T08 đạt yêu cầu.

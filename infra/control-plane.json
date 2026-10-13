@@ -1546,6 +1546,20 @@
                   ]
                 }
               }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "elasticfilesystem:DescribeReplicationConfigurations",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
             }
           ]
         }

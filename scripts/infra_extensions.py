@@ -81,6 +81,9 @@ def extend(params,r,settings,cf,worker):
             'ec2:Subnet':[
             sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnetId}'),
             sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PublicSubnet2Id}')]}}))
+    # The EFS CloudFormation delete handler checks replication before deleting.
+    cf.append(policy('elasticfilesystem:DescribeReplicationConfigurations',
+        arn('elasticfilesystem','file-system/*'),region))
     worker.extend([
         policy('cloudformation:UpdateStack',arn('cloudformation','stack/cloudhub-env-*/*')),
         policy(['rds:DescribeDBInstances','rds:DescribeDBSnapshots','rds:DescribeDBSubnetGroups'],condition=region),

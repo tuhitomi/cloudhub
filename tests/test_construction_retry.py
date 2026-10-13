@@ -81,5 +81,12 @@ class ConstructionRetryTests(unittest.TestCase):
         self.assertIn('ec2:Vpc',delete['Condition']['ArnEquals'])
         self.assertEqual(len(delete['Condition']['ArnEquals']['ec2:Subnet']),2)
         self.assertNotIn('CreateNetworkInterface',str(resources['EnvironmentBoundary']))
+        metadata=[(r,s) for n,r in resources.items() if n.startswith('EnvironmentPolicy')
+            for s in r['Properties']['PolicyDocument']['Statement'] if s['Action']=='elasticfilesystem:DescribeReplicationConfigurations']
+        self.assertEqual(len(metadata),1)
+        resource,statement=metadata[0]
+        self.assertEqual(resource['Properties']['Roles'],[{'Ref':'EnvironmentCfRole'}])
+        self.assertEqual(statement['Resource'],{'Fn::Sub':'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*'})
+        self.assertEqual(statement['Condition'],{'StringEquals':{'aws:RequestedRegion':{'Ref':'AWS::Region'}}})
 
 if __name__=='__main__':unittest.main()

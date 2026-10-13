@@ -17,7 +17,7 @@ class CF:
     def __init__(self,status='CREATE_FAILED',owner='alice'):
         self.status,self.owner,self.calls=status,owner,[]
     def describe_stacks(self,**kwargs):
-        return {'Stacks':[{'StackStatus':self.status,'Outputs':[],
+        return {'Stacks':[{'StackStatus':self.status,'Outputs':[],'DisableRollback':True,
             'Tags':[{'Key':'cloudhub:environment','Value':'env-test'},{'Key':'cloudhub:owner','Value':self.owner}]}]}
     def update_stack(self,**kwargs):self.calls.append(kwargs)
 
@@ -32,6 +32,14 @@ class ConstructionRetryTests(unittest.TestCase):
         cf=CF(owner='bob');driver=StackDriver({'cf_role_arn':'approved-role'},{'cloudformation':cf})
         with self.assertRaises(HubError):driver.create(self.env(),{'operation_id':'op-test'},None)
         self.assertEqual(cf.calls,[])
+    def test_legacy_do_nothing_stack_is_retained_without_invalid_update(self):
+        cf=CF();describe=cf.describe_stacks
+        def legacy(**kwargs):
+            result=describe(**kwargs);result['Stacks'][0]['DisableRollback']=False;return result
+        cf.describe_stacks=legacy
+        driver=StackDriver({'cf_role_arn':'approved-role'},{'cloudformation':cf})
+        with self.assertRaises(HubError) as caught:driver.create(self.env(),{'operation_id':'op-test'},None)
+        self.assertEqual(caught.exception.code,'LEGACY_STACK_RETRY_UNAVAILABLE');self.assertEqual(cf.calls,[])
     def test_response_loss_does_not_repeat_in_progress_update(self):
         cf=CF('UPDATE_IN_PROGRESS');driver=StackDriver({'cf_role_arn':'approved-role'},{'cloudformation':cf})
         driver.create(self.env(),{'operation_id':'op-test'},None);self.assertEqual(cf.calls,[])

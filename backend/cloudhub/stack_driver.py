@@ -21,6 +21,9 @@ class StackDriver(AWSDriver):
         existing=self.assert_stack(env)
         if existing:
             if existing['StackStatus'] in {'CREATE_FAILED','UPDATE_FAILED'}:
+                if existing.get('DisableRollback') is not True:
+                    raise HubError('LEGACY_STACK_RETRY_UNAVAILABLE',
+                        'Stack cũ không hỗ trợ thử lại. Giữ dữ liệu; quản trị cần sao lưu và thu hồi trước khi tạo mới.',409)
                 # Retry only the saved template on this exact owned stack.
                 # Preserve successful resources and data if another step fails.
                 self.cloudformation.update_stack(StackName=self.stack_name(env),UsePreviousTemplate=True,
@@ -29,7 +32,7 @@ class StackDriver(AWSDriver):
                     RoleARN=self.settings['cf_role_arn'])
             return
         self.cloudformation.create_stack(StackName=self.stack_name(env),TemplateBody=json.dumps(self.build_template(env,recovery)),
-            Capabilities=['CAPABILITY_NAMED_IAM'],ClientRequestToken=op['operation_id'],OnFailure='DO_NOTHING',RoleARN=self.settings['cf_role_arn'],
+            Capabilities=['CAPABILITY_NAMED_IAM'],ClientRequestToken=op['operation_id'],DisableRollback=True,RoleARN=self.settings['cf_role_arn'],
             Tags=[{'Key':'cloudhub:environment','Value':env['environment_id']},{'Key':'cloudhub:owner','Value':env['owner_id']}])
     def created(self,env):
         stack=self.assert_stack(env)
